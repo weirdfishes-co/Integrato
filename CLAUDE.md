@@ -149,6 +149,10 @@ context/*.md         knowledge base
 - `MODEL_MAX_TOKENS` is validated by OpenRouter against your *remaining credit*,
   not just against the model: a value your balance cannot cover fails the whole
   request with a 402 before the model runs.
+- **SMTP has explicit timeouts** (`mail.ts`). Nodemailer waits on the OS
+  otherwise, so a blocked outbound port leaves `POST /login` hanging for minutes
+  with no response — the user sees an endless spinner rather than an error. The
+  timeouts turn that into a 502 with a readable message in ten seconds.
 - **The container starts as root on purpose.** Railway bind-mounts the volume
   over `/data` at runtime and it arrives owned by root, which hides the
   build-time `chown`. `scripts/entrypoint.sh` therefore fixes ownership and then

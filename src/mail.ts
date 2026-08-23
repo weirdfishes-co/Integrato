@@ -15,6 +15,16 @@ function escapeHtml(value: string): string {
     .replaceAll('"', '&quot;');
 }
 
+/**
+ * Without these, a blocked outbound SMTP port (a common hosting default) leaves
+ * the send hanging until the OS gives up — minutes during which the sign-in
+ * request never answers and the user just watches a spinner. Failing fast turns
+ * that into a visible "could not send" message instead.
+ */
+const CONNECTION_TIMEOUT_MS = 10_000;
+const GREETING_TIMEOUT_MS = 10_000;
+const SOCKET_TIMEOUT_MS = 20_000;
+
 export function createMailer(config: Config): Mailer {
   const appName = config.assistantName;
 
@@ -34,7 +44,17 @@ export function createMailer(config: Config): Mailer {
     port: config.mail.port,
     secure: config.mail.secure,
     auth: config.mail.user ? { user: config.mail.user, pass: config.mail.pass } : undefined,
+    connectionTimeout: CONNECTION_TIMEOUT_MS,
+    greetingTimeout: GREETING_TIMEOUT_MS,
+    socketTimeout: SOCKET_TIMEOUT_MS,
   });
+
+  if (!config.mail.user) {
+    logger.warn(
+      { host: config.mail.host },
+      'SMTP_USER is empty — connecting to the relay without authentication',
+    );
+  }
 
   return {
     async sendMagicLink(to, link, minutesValid) {
