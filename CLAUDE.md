@@ -16,7 +16,8 @@ and are available again after signing in. Admins manage the user list on
 The app is generic: the product name (`ASSISTANT_NAME`) and the answer language
 (`ASSISTANT_LANGUAGE`) are configuration, not hard-coded strings.
 
-Status: working and complete. There is no mobile app — this is deliberately
+Status: working, deployed on Railway from the private GitHub repo
+`weirdfishes-co/aiassistant`. There is no mobile app — this is deliberately
 web-only (see Decisions).
 
 ## Stack
@@ -41,7 +42,8 @@ src/
   compaction.ts      summarizes old turns once a conversation gets long
   content.ts         read/write the knowledge base + path validation + seeding
   context.ts         builds the system prompt from instr.md + context/*.md
-  mail.ts            SMTP delivery of the magic link
+  mail.ts            magic-link delivery: Brevo HTTP API, SMTP, or the log
+  logger.ts          pino instance shared by every module
   rate-limit.ts      in-memory limiter for the login form
   views.ts           server-side HTML (everything through escapeHtml)
   routes/            auth.ts, chat.ts, admin.ts, content.ts
@@ -51,8 +53,9 @@ src/
     migrations/      forward-only .sql files
 public/              styles.css, app.js, upload.js (frontend, no build step)
 scripts/build.mjs    esbuild bundle to dist/ + copy migrations
-tests/               vitest: context.test.ts, auth.test.ts, content.test.ts,
-                     settings.test.ts
+scripts/entrypoint.sh  takes ownership of /data, then drops to the node user
+tests/               vitest: auth, content, context, settings, features
+                     (memory + compaction), views (admin balance panel), mail
 instr.md             system prompt — the user owns its content
 instr.example.md     neutral starting prompt, safe to copy over instr.md
 context/*.md         knowledge base
@@ -105,6 +108,12 @@ context/*.md         knowledge base
   The knowledge base is the cached prefix shared by every user; putting a
   per-user block in front of it would invalidate the cache for everyone on every
   request.
+- **Mail over Brevo's HTTP API, not SMTP.** Railway could open no TCP connection
+  to Brevo's SMTP port — `Connection timeout` at the `CONN` stage on 587, 2525
+  and 465 alike, before any credential was exchanged, while the identical
+  configuration worked from a laptop. Port 443 has no such problem. `mail.ts`
+  picks the transport: `BREVO_API_KEY` first, then `SMTP_HOST`, then the log
+  (non-production only). SMTP is kept because it works fine locally.
 - **Knowledge base on the volume, not in the image.** `/admin/content` lets an
   admin edit `instr.md` and the context documents. That only works durably when
   the files live outside the image, so the image sets `CONTEXT_DIR=/data/context`
@@ -129,13 +138,17 @@ context/*.md         knowledge base
   suggest at most. `instr.example.md` exists for that purpose.
 - That prompt is written for another platform and refers to tools
   (`CoachSuzy_OphalenGeheugen`, `CoachSuzy_OpslaanGeheugen`) this app does not
-  have. It is also in Dutch, while `ASSISTANT_LANGUAGE` now defaults to English —
+  have — though the app does now have a cross-conversation memory feature of its
+  own (`memory.ts`), which the prompt does not know about and does not need to.
+  It is also in Dutch, while `ASSISTANT_LANGUAGE` now defaults to English —
   the two will fight until the prompt is replaced or the variable is set to
   `Dutch`. The `{Global.X}` placeholders *are* resolved: `context.ts` replaces
   them with `context/X.md`. As long as those files are missing they stay literal
   in the prompt and a warning appears in the log.
-- Conversation memory runs through the database, not through tools:
-  `routes/chat.ts` sends the last `HISTORY_LIMIT` (40) messages along.
+- Two different kinds of memory, both database-backed and neither using tools.
+  *Within* a conversation, `routes/chat.ts` replays the last `HISTORY_LIMIT`
+  (40) messages. *Across* conversations, `memory.ts` extracts durable facts into
+  the `memories` table — off unless an admin enables it on `/admin`.
 - Authorization on conversations lives in the SQL (`WHERE ... AND user_id = ?`),
   not in a separate check. Keep it that way for new queries.
 - File names on the knowledge base page come from a user. `safePath()` in
@@ -159,6 +172,11 @@ context/*.md         knowledge base
   otherwise, so a blocked outbound port leaves `POST /login` hanging for minutes
   with no response — the user sees an endless spinner rather than an error. The
   timeouts turn that into a 502 with a readable message in ten seconds.
+- **Never set `DATABASE_PATH`, `CONTEXT_DIR` or `INSTRUCTIONS_PATH` to a
+  relative path in a deployed environment.** The image points all three at
+  `/data`; a value copied from `.env` such as `./data/app.db` resolves inside
+  `/app`, which the `node` user cannot write, and the boot fails with
+  `EACCES: permission denied, mkdir './data'`.
 - **The container starts as root on purpose.** Railway bind-mounts the volume
   over `/data` at runtime and it arrives owned by root, which hides the
   build-time `chown`. `scripts/entrypoint.sh` therefore fixes ownership and then

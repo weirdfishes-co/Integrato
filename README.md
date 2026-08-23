@@ -5,11 +5,13 @@ sent to their email address, their conversations are stored in SQLite and are
 available again after signing in later. The personality and instructions live in
 `instr.md`; the knowledge base is the set of markdown files in `context/`.
 
-- **Stack**: Node 22, TypeScript, Express 5, SQLite (better-sqlite3), nodemailer
+- **Stack**: Node 22, TypeScript, Express 5, SQLite (better-sqlite3)
 - **Model access**: OpenRouter (OpenAI-compatible API), one key for every model
+- **Email**: Brevo HTTP API, with SMTP as an alternative
 - **Hosting**: Railway (Dockerfile + persistent volume for the database)
 - **Auth**: magic link over email, 30-day cookie session
-- **Admin**: `/admin` to add users and pick the model, `/admin/content` for the knowledge base
+- **Admin**: `/admin` for users, model, assistant settings and the OpenRouter
+  balance; `/admin/content` for the knowledge base
 
 The product name and the answer language are configuration, not code: set
 `ASSISTANT_NAME` and `ASSISTANT_LANGUAGE` and the interface, the sign-in email
@@ -43,8 +45,8 @@ SIGN-IN LINK (dev mode, not emailed)  link: http://localhost:3000/auth/callback?
 ```
 
 Paste that URL into your browser and you are in. This only works outside
-production: with `NODE_ENV=production` `SMTP_HOST` is required, so a sign-in
-link can never end up in a log file there.
+production: with `NODE_ENV=production` one of `BREVO_API_KEY` or `SMTP_HOST` is
+required, so a sign-in link can never end up in a log file there.
 
 Other scripts:
 
@@ -204,8 +206,16 @@ which the `Retry-After` header times.
    | `MODEL_EFFORT` / `MODEL_MAX_TOKENS` | no | Default `high` and `8000`. Effort is `low`–`max`; only reasoning models act on it |
    | `OPENROUTER_SITE_URL` / `OPENROUTER_SITE_NAME` | no | Optional attribution on the openrouter.ai rankings |
    | `SESSION_DAYS` / `LOGIN_TOKEN_MINUTES` | no | Default 30 days and 30 minutes |
+   | `LOG_LEVEL` | no | pino level, default `info` |
 
-   Railway sets `PORT` itself; the server binds on `0.0.0.0`.
+   \* One of `BREVO_API_KEY` or `SMTP_HOST` is required in production. Prefer the
+   API key: Railway could not open a TCP connection to Brevo's SMTP port on 587,
+   2525 or 465, which surfaced as `Connection timeout` and no email.
+
+   Railway sets `PORT` itself; the server binds on `0.0.0.0`. Do not set
+   `DATABASE_PATH`, `CONTEXT_DIR` or `INSTRUCTIONS_PATH` to relative paths — the
+   image already points them at the volume, and a relative value resolves inside
+   `/app`, where the server cannot write.
 4. **Volume ownership is handled for you.** The mounted volume arrives owned by
    root; `scripts/entrypoint.sh` takes ownership of it and then runs the server
    as the unprivileged `node` user.
@@ -217,9 +227,9 @@ Test the container locally the way Railway runs it:
 ```bash
 docker build -t ai-assistant .
 docker run --rm -p 3000:3000 \
-  -e ANTHROPIC_API_KEY=sk-ant-... \
+  -e OPENROUTER_API_KEY=sk-or-v1-... \
   -e ADMIN_EMAILS=you@example.com \
-  -e SMTP_HOST=smtp.example.com \
+  -e BREVO_API_KEY=xkeysib-... \
   -e APP_URL=http://localhost:3000 \
   -v "$PWD/data:/data" \
   ai-assistant
@@ -238,3 +248,9 @@ docker run --rm -p 3000:3000 \
 - The knowledge base page only writes inside the context directory: file names
   are validated *and* the resolved path is checked against the base directory,
   so `../` or an absolute path cannot write outside it.
+- Remembered facts are per user and read with the owner in the SQL, exactly like
+  conversations, so one user's memory never reaches another's prompt.
+- The server runs as the unprivileged `node` user; only the entrypoint that
+  takes ownership of the volume runs as root, for a moment at startup.
+- Secrets stay in the environment: `.env`, the database and the `data/` directory
+  are all in `.gitignore` and never enter the image or the repository.
