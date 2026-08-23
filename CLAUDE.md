@@ -149,6 +149,12 @@ context/*.md         knowledge base
 - `MODEL_MAX_TOKENS` is validated by OpenRouter against your *remaining credit*,
   not just against the model: a value your balance cannot cover fails the whole
   request with a 402 before the model runs.
+- **Mail goes over Brevo's HTTP API when `BREVO_API_KEY` is set**, and only
+  falls back to SMTP otherwise (`mail.ts` picks the transport). Railway could
+  open no TCP connection to Brevo's SMTP port — `Connection timeout` at `CONN`,
+  before any credential was exchanged, while the identical config worked from a
+  laptop. Port 443 has no such problem. Both transports share
+  `buildMagicLinkEmail()`, so the email itself only exists once.
 - **SMTP has explicit timeouts** (`mail.ts`). Nodemailer waits on the OS
   otherwise, so a blocked outbound port leaves `POST /login` hanging for minutes
   with no response — the user sees an endless spinner rather than an error. The

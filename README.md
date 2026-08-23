@@ -21,7 +21,7 @@ For the architecture and the reasoning behind the choices: see [CLAUDE.md](CLAUD
 
 ```bash
 npm install
-cp .env.example .env      # fill in OPENROUTER_API_KEY, ADMIN_EMAILS and SMTP_*
+cp .env.example .env      # fill in OPENROUTER_API_KEY, ADMIN_EMAILS and the mail settings
 npm run dev               # http://localhost:3000
 ```
 
@@ -29,8 +29,14 @@ The database is created automatically at `DATABASE_PATH` (default
 `./data/app.db`) and migrations run at startup. The addresses in `ADMIN_EMAILS`
 are written into the user list as admins on every boot, so you can always get in.
 
-**Signing in without a mail server.** Leave `SMTP_HOST` empty and the sign-in
-link is written to the log instead of emailed:
+**Sending mail.** Set `BREVO_API_KEY` to send over Brevo's HTTP API, or
+`SMTP_HOST` (plus `SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`) to send over SMTP. The API
+key wins when both are set. Prefer the API key on a hosting platform: it runs
+over 443, while outbound SMTP ports are often blocked — by the host or by the
+mail provider — which surfaces as `Connection timeout` and no email.
+
+**Signing in without a mail server.** Leave both empty and the sign-in link is
+written to the log instead of emailed:
 
 ```
 SIGN-IN LINK (dev mode, not emailed)  link: http://localhost:3000/auth/callback?token=...
@@ -184,7 +190,8 @@ which the `Retry-After` header times.
    | --- | --- | --- |
    | `OPENROUTER_API_KEY` | yes | API key from [openrouter.ai/keys](https://openrouter.ai/keys) |
    | `ADMIN_EMAILS` | yes | Comma-separated admins; always granted rights at boot |
-   | `SMTP_HOST` | yes | SMTP server for the magic links |
+   | `BREVO_API_KEY` | yes* | Brevo HTTP API key — the reliable option on Railway |
+   | `SMTP_HOST` | yes* | SMTP server, if you send over SMTP instead |
    | `SMTP_PORT` / `SMTP_SECURE` | no | Default 587 with STARTTLS; `SMTP_SECURE=true` for port 465 |
    | `SMTP_USER` / `SMTP_PASS` | no | Leave empty for a relay without authentication |
    | `MAIL_FROM` | no | Sender, e.g. `AI Assistant <noreply@yourdomain.com>` |
