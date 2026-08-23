@@ -149,6 +149,12 @@ context/*.md         knowledge base
 - `MODEL_MAX_TOKENS` is validated by OpenRouter against your *remaining credit*,
   not just against the model: a value your balance cannot cover fails the whole
   request with a 402 before the model runs.
+- **`context/.gitkeep` must stay.** The Dockerfile does `COPY context ./context`,
+  and git does not track empty directories — delete the last file in `context/`
+  and the *image build* fails with `"/context": not found`, even though the app
+  runs fine without any context documents. The knowledge base on a deployed
+  instance lives on the volume (`/data/context`), so deleting documents through
+  `/admin/content` is safe; deleting them from the repo is not.
 - The model catalogue is a live network call (`models.ts`, cached one hour). The
   admin page must keep working when it fails — it degrades to a text field.
 - **Two different OpenRouter limits, easily confused** (`balance.ts` reports

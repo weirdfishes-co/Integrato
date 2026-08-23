@@ -55,7 +55,8 @@ npm test            # vitest
   `ASSISTANT_LANGUAGE`" is appended automatically — you do not need to put it in
   there. [`instr.example.md`](instr.example.md) holds a neutral starting point.
 - **`context/*.md`** are sent along as knowledge base, alphabetically by file
-  name. See [`context/README.md`](context/README.md).
+  name. The directory ships empty; add documents through `/admin/content` or by
+  dropping `.md` files in there.
 - A placeholder such as `{Global.Guidelines}` in `instr.md` is replaced by the
   content of `context/Guidelines.md`.
 
