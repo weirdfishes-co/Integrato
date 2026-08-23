@@ -42,6 +42,12 @@ ENV DATABASE_PATH=/data/app.db \
     INSTRUCTIONS_PATH=/data/instr.md
 RUN mkdir -p /data && chown -R node:node /data /app/context /app/instr.md
 
-USER node
+# The volume is mounted over /data at runtime and arrives owned by root, so the
+# chown above no longer applies to it. entrypoint.sh fixes that as root and then
+# drops to `node` — which is why there is no USER instruction here.
+COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
 EXPOSE 3000
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["node", "dist/server.js"]

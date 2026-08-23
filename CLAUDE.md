@@ -149,6 +149,12 @@ context/*.md         knowledge base
 - `MODEL_MAX_TOKENS` is validated by OpenRouter against your *remaining credit*,
   not just against the model: a value your balance cannot cover fails the whole
   request with a 402 before the model runs.
+- **The container starts as root on purpose.** Railway bind-mounts the volume
+  over `/data` at runtime and it arrives owned by root, which hides the
+  build-time `chown`. `scripts/entrypoint.sh` therefore fixes ownership and then
+  drops to `node` with `setpriv` — do not add a `USER node` instruction back, and
+  do not assume the build-time chown covers the volume. Symptom if this breaks:
+  `SqliteError: unable to open database file` (`SQLITE_CANTOPEN`) on boot.
 - **`context/.gitkeep` must stay.** The Dockerfile does `COPY context ./context`,
   and git does not track empty directories — delete the last file in `context/`
   and the *image build* fails with `"/context": not found`, even though the app

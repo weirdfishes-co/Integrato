@@ -199,7 +199,10 @@ which the `Retry-After` header times.
    | `SESSION_DAYS` / `LOGIN_TOKEN_MINUTES` | no | Default 30 days and 30 minutes |
 
    Railway sets `PORT` itself; the server binds on `0.0.0.0`.
-4. **The health check** is on `/healthz`. Migrations run inside the server
+4. **Volume ownership is handled for you.** The mounted volume arrives owned by
+   root; `scripts/entrypoint.sh` takes ownership of it and then runs the server
+   as the unprivileged `node` user.
+5. **The health check** is on `/healthz`. Migrations run inside the server
    process, so there is no separate migration command.
 
 Test the container locally the way Railway runs it:
