@@ -37,6 +37,47 @@ interface LayoutOptions {
  */
 const ASSET_VERSION = Date.now().toString(36);
 
+/**
+ * Decorative flowing contour lines behind the assistant picker.
+ *
+ * Two mirrored fans of curves, each drawn with a travelling dash so the lines
+ * appear to be drawn continuously. The markup is generated once at module load
+ * rather than per request: it is the same on every page.
+ *
+ * Purely decorative, so it is aria-hidden and never takes pointer events, and
+ * it stops moving entirely under prefers-reduced-motion (see styles.css).
+ */
+function buildBackgroundPaths(): string {
+  const PATHS_PER_FAN = 24;
+  const groups: string[] = [];
+
+  for (const direction of [1, -1]) {
+    const paths: string[] = [];
+    for (let i = 0; i < PATHS_PER_FAN; i += 1) {
+      const shift = i * 5 * direction;
+      const drop = i * 6;
+      const d =
+        `M${-380 - shift} ${-189 + drop}` +
+        `C${-380 - shift} ${-189 + drop} ${-312 - shift} ${216 - drop} ${152 - shift} ${343 - drop}` +
+        `C${616 - shift} ${470 - drop} ${684 - shift} ${875 - drop} ${684 - shift} ${875 - drop}`;
+      // Slower and fainter as the fan spreads out, so the eye follows the front.
+      const duration = (18 + i * 0.6).toFixed(1);
+      const delay = (i * -0.45).toFixed(2);
+      const width = (0.5 + i * 0.035).toFixed(2);
+      paths.push(
+        `<path d="${d}" stroke-width="${width}" pathLength="1" ` +
+          `style="animation-duration:${duration}s;animation-delay:${delay}s"/>`,
+      );
+    }
+    groups.push(`<g class="paths__fan">${paths.join('')}</g>`);
+  }
+
+  return `<svg class="paths" viewBox="-400 -200 1100 1100" preserveAspectRatio="xMidYMid slice"
+       aria-hidden="true" focusable="false">${groups.join('')}</svg>`;
+}
+
+const BACKGROUND_PATHS = buildBackgroundPaths();
+
 function layout({ title, body, bodyClass, scripts = [] }: LayoutOptions): string {
   const scriptTags = scripts
     .map((src) => `<script type="module" src="${src}?v=${ASSET_VERSION}" defer></script>`)
@@ -300,7 +341,9 @@ ${assistants
 
       return layout({
         title: `Assistants — ${assistantName}`,
-        body: `    <main class="page">
+        bodyClass: 'has-paths',
+        body: `    ${BACKGROUND_PATHS}
+    <main class="page page--picker">
       <header class="page__head">
         <h1>Choose an assistant</h1>
         <div class="row">

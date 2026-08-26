@@ -759,3 +759,74 @@ input[type='file'] {
   color: var(--text-muted);
   line-height: 1.45;
 }
+
+/* ---------- animated background paths (assistant picker) ---------- */
+
+.has-paths {
+  position: relative;
+  overflow-x: hidden;
+}
+
+.paths {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  /* Decoration only: never swallow a click meant for a card. */
+  pointer-events: none;
+  color: var(--text);
+}
+
+.paths__fan path {
+  fill: none;
+  stroke: currentColor;
+  /* A short dash travelling along the whole path reads as "being drawn". */
+  stroke-dasharray: 0.32 0.68;
+  stroke-linecap: round;
+  opacity: 0;
+  animation-name: path-flow;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+@keyframes path-flow {
+  0% {
+    stroke-dashoffset: 1;
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.5;
+  }
+  85% {
+    opacity: 0.5;
+  }
+  100% {
+    stroke-dashoffset: -1;
+    opacity: 0;
+  }
+}
+
+/* The lines are faint ink on white and faint light on black; the alpha differs
+   because the same opacity reads much stronger against a dark ground. */
+.paths { opacity: 0.16; }
+
+@media (prefers-color-scheme: dark) {
+  .paths { opacity: 0.22; }
+}
+
+/* The picker sits above the artwork. */
+.page--picker {
+  position: relative;
+  z-index: 1;
+}
+
+/* Movement is the whole point, so honour a request to stop it: the lines stay,
+   evenly drawn and still. */
+@media (prefers-reduced-motion: reduce) {
+  .paths__fan path {
+    animation: none;
+    stroke-dasharray: none;
+    opacity: 0.45;
+  }
+}

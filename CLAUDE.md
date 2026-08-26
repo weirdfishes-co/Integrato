@@ -146,6 +146,12 @@ context/*.md         knowledge base seeded into a brand-new assistant
 - **Uploads as JSON, not multipart.** The browser reads the `.md` file with
   `file.text()` and POSTs it as JSON — saves a multer dependency for what is
   always text.
+- **The picker's background is generated once, not per request.**
+  `buildBackgroundPaths()` in `views.ts` builds two mirrored fans of curves at
+  module load and `layout()` reuses the string; it adds about 6 kB to that one
+  page. It is decoration: `aria-hidden`, `pointer-events: none`, and reduced to
+  static lines under `prefers-reduced-motion`. Animation is CSS only — a
+  travelling dash over `pathLength="1"` — so no animation library is needed.
 - **Static assets carry a per-boot version** (`ASSET_VERSION` in `views.ts`,
   appended as `?v=` to the script and stylesheet URLs). `express.static` caches
   them for an hour in production, so the deploy that moved the API to
