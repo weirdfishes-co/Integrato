@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { describeChatError } from '../src/llm.js';
 
 /** Builds the error shape the OpenAI client throws for a status. */
-function apiError(status: number): OpenAI.APIError {
+function apiError(status: number): InstanceType<typeof OpenAI.APIError> {
   return new OpenAI.APIError(status, { error: { message: 'upstream detail' } }, 'boom', undefined);
 }
 

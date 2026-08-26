@@ -33,7 +33,9 @@ are written into the user list as admins on every boot, so you can always get in
 
 **Sending mail.** Set `BREVO_API_KEY` to send over Brevo's HTTP API, or
 `SMTP_HOST` (plus `SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`) to send over SMTP. The API
-key wins when both are set. Prefer the API key on a hosting platform: it runs
+key wins when both are set — the `SMTP_*` variables are then never read and can
+be removed. `MAIL_FROM` is **not** SMTP-only: both transports use it, so it must
+stay. Prefer the API key on a hosting platform: it runs
 over 443, while outbound SMTP ports are often blocked — by the host or by the
 mail provider — which surfaces as `Connection timeout` and no email.
 
@@ -75,9 +77,12 @@ their assistants — or goes straight into the chat when they have exactly one.
 **Isolation.** Conversations and remembered facts are stored per user *and* per
 assistant. Nothing a user tells one assistant reaches another.
 
-**Deleting** an assistant removes its conversations, memories, settings and
+**Deleting** an assistant — the Delete beside Open in the assistants table, or
+the button on its own page — removes its conversations, memories, settings and
 grants. Its knowledge-base files are deliberately left on disk, so a mistaken
-click does not destroy documents that took work to write.
+click does not destroy documents that took work to write. Nothing stops you
+deleting the last assistant; a fresh one is created on the next boot, but the
+deleted conversations are gone.
 
 ## Changing the instructions and context
 
@@ -138,6 +143,24 @@ switch model; no setting can fix it from this side. Models that behaved well in
 testing: `nvidia/nemotron-3-ultra-550b-a55b:free`, `poolside/laguna-s-2.1:free`,
 `dots-studio/dots-3-note-preview:free`.
 
+## When an answer fails
+
+The chat screen names the cause rather than showing one generic error:
+
+| Message | What to do |
+| --- | --- |
+| …too little credit for this request | Add credit at OpenRouter, or lower `MODEL_MAX_TOKENS` |
+| The OpenRouter key was rejected | Check `OPENROUTER_API_KEY` in the environment |
+| This model is not available on OpenRouter | Pick another model on the assistant's page |
+| Too many requests at once | Wait a moment and retry |
+| The model provider is unavailable | Retry shortly; the fault is upstream |
+
+A telling pattern: if a `:free` model answers but a paid one fails, the key is
+out of credit — free models run on an empty balance, paid ones do not. Note that
+a deployed instance can hold a *different* key from your local `.env`.
+
+The full provider error, including its metadata, is always in the server log.
+
 ## Watching the balance
 
 `/admin` shows what is left at OpenRouter, because an empty account is the most
@@ -176,9 +199,15 @@ is worth knowing when judging how reliable they are:
 
 - **Memory** is a second, cheap model call after each answer that extracts
   durable facts ("Works as a recruiter at Acme.") into the `memories` table, per
-  user. They are prepended to the system prompt in later conversations. It costs
-  one extra call per message and never blocks the reply — a failure is logged and
-  ignored.
+  user *and* per assistant. They are prepended to the system prompt in later
+  conversations. At most 10 facts per exchange and the 40 most recent are sent.
+  It costs one extra call per message and never blocks the reply — a failure is
+  logged and ignored.
+
+  Two limits worth knowing before switching it on: **deleting a conversation
+  does not erase facts already extracted from it**, and there is no page yet to
+  see or delete what an assistant remembers about someone. With memory off,
+  deleting a conversation really is complete forgetting.
 - **Citations** are prompt-enforced, not API-guaranteed: the model is asked to
   write `[Guidelines.md]` after a sentence drawn from that document. A model can
   forget or invent one, unlike a provider-level citation API.
@@ -273,6 +302,11 @@ docker run --rm -p 3000:3000 \
   5 attempts per fifteen minutes per address and per IP.
 - Session cookies are `httpOnly` + `sameSite=lax`, and `secure` as soon as
   `APP_URL` is on `https://`.
+- A session lasts `SESSION_DAYS` (30) from signing in and is **not** extended by
+  activity, so an active user still signs in again after 30 days. Expiry is
+  checked against the database on every request as well as by the cookie, so a
+  copied cookie stops working too. Signing out deletes the row immediately.
+  Sessions are per browser: phone and laptop expire independently.
 - Conversation history is walled off per user: the owner is part of the SQL
   query, not a check afterwards.
 - The knowledge base page only writes inside the context directory: file names

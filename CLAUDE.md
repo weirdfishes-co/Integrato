@@ -146,6 +146,13 @@ context/*.md         knowledge base seeded into a brand-new assistant
 - **Uploads as JSON, not multipart.** The browser reads the `.md` file with
   `file.text()` and POSTs it as JSON — saves a multer dependency for what is
   always text.
+- **Static assets carry a per-boot version** (`ASSET_VERSION` in `views.ts`,
+  appended as `?v=` to the script and stylesheet URLs). `express.static` caches
+  them for an hour in production, so the deploy that moved the API to
+  `/api/a/:slug/...` left browsers running the previous `app.js` against the new
+  routes; it requested `/api/conversations`, hit the catch-all and reported
+  "Loading failed: Not found". Any change to the frontend/API contract has the
+  same failure mode, so leave the version in place.
 - **Views are built by a factory** (`createViews`), not free functions, so
   `ASSISTANT_NAME` reaches every page without a module-level global. Routers
   take `views` as a dependency, matching the `createX(deps)` idiom used
@@ -155,6 +162,21 @@ context/*.md         knowledge base seeded into a brand-new assistant
   alongside cookies + a static build of the frontend.
 
 ## Pitfalls
+
+- **A failed answer must name its cause.** `describeChatError()` in `llm.ts`
+  maps the provider's status onto something a reader can act on — 402 credit,
+  401/403 key, 404 model, 429 rate limit — because the fix differs per case and
+  a single "something went wrong" sends everyone to the server log. The
+  provider's own message is deliberately not echoed to the browser. A real
+  example: paid models failed on Railway while a `:free` model worked, which is
+  the signature of a key with no credit; the generic message hid that for two
+  rounds of guessing.
+- **Sessions are a fixed 30-day window, not a sliding one.** `expires_at` is
+  written once in `createSession` and never extended, so an active user is still
+  signed out on day 30. It is enforced twice: the cookie's own `expires`, and
+  `expires_at > datetime('now')` in the session lookup, so a copied cookie dies
+  with the row. Making it sliding means updating the row *and* re-issuing the
+  cookie in `findUserBySessionToken`.
 
 - `instr.md` in the repo belongs to the user and is only a **seed**: it is
   copied into each newly created assistant, after which that assistant's own
@@ -229,6 +251,12 @@ context/*.md         knowledge base seeded into a brand-new assistant
   therefore sends the include list alone when an admin fills in both.
 - Memory rows are per user and read with `user_id` in the SQL, like conversations.
   Keep it that way — a leak here crosses users.
+- **Deleting a conversation does not erase what was remembered from it.**
+  `memories` rows live independently of `conversations`, so a user who deletes a
+  thread keeps its extracted facts in every later prompt. There is also no page
+  to view or delete memories — `clearMemories()` exists in the repo and nothing
+  calls it. Both are known gaps, not oversights to "fix" silently: a memories
+  panel per user is the intended shape.
 - **Never parse a background completion as free text.** Some models (several free
   ones especially) write their chain of thought into `message.content`. Memory
   extraction stored that reasoning as "facts" until `parseFacts` was changed to
