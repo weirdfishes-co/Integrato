@@ -7,7 +7,7 @@ import type { Config } from '../config.js';
 import { buildSystemPrompt } from '../context.js';
 import type { Assistant, Repo } from '../db/repo.js';
 import type { ChatClient, SourceLink } from '../llm.js';
-import { ChatRefusalError } from '../llm.js';
+import { ChatRefusalError, describeChatError } from '../llm.js';
 import { logger } from '../logger.js';
 import { memorySection, rememberExchange } from '../memory.js';
 import { loadSettings } from '../settings.js';
@@ -216,9 +216,7 @@ export function createChatRouter({ config, repo, auth, chat, views }: ChatRouteD
           return;
         }
         const message =
-          error instanceof ChatRefusalError
-            ? error.message
-            : 'Something went wrong while fetching the answer. Please try again.';
+          error instanceof ChatRefusalError ? error.message : describeChatError(error);
         logger.error({ err: error, conversationId }, 'chat stream failed');
         send('error', { message });
         res.end();

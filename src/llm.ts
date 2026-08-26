@@ -56,6 +56,35 @@ export class ChatRefusalError extends Error {
   readonly code = 'refusal';
 }
 
+/**
+ * A message a user can act on, from an OpenRouter failure.
+ *
+ * "Something went wrong" tells nobody anything: the common causes each have a
+ * different fix, and only an admin reading the server log could tell them
+ * apart. The status codes are stable enough to name the cause without leaking
+ * anything from the provider's own message.
+ */
+export function describeChatError(error: unknown): string {
+  const status = error instanceof OpenAI.APIError ? error.status : undefined;
+
+  switch (status) {
+    case 401:
+    case 403:
+      return 'The OpenRouter key was rejected. An administrator needs to check it.';
+    case 402:
+      return 'The OpenRouter account has too little credit for this request. An administrator needs to add credit, or lower MODEL_MAX_TOKENS.';
+    case 404:
+      return 'This model is not available on OpenRouter. An administrator can pick another one on the admin page.';
+    case 429:
+      return 'Too many requests at once, or the model is rate limited. Please try again in a moment.';
+    case 502:
+    case 503:
+      return 'The model provider is unavailable right now. Please try again shortly.';
+    default:
+      return 'Something went wrong while fetching the answer. Please try again.';
+  }
+}
+
 interface ReasoningConfig {
   effort?: Effort;
   exclude?: boolean;
