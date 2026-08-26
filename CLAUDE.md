@@ -6,15 +6,19 @@ instructions (installing, deploying, env variables) live in [README.md](README.m
 
 ## What this is
 
-A chatbot that answers on the basis of a fixed system prompt (`instr.md`) plus
-markdown files as knowledge base (`context/`). The model runs through
-OpenRouter and is chosen by an admin on `/admin`. Only email addresses on the user
-list can sign in, via a magic link. Conversations are stored per user in SQLite
-and are available again after signing in. Admins manage the user list on
-`/admin` and the knowledge base on `/admin/content`.
+A host for **several chat assistants**. Each assistant has its own system
+prompt, its own markdown knowledge base, its own model and settings, and its own
+list of users. The model runs through OpenRouter. Only email addresses on the
+user list can sign in, via a magic link; after signing in a user picks from the
+assistants they were granted. Conversations and remembered facts are stored per
+user *and* per assistant, so nothing crosses between them.
 
-The app is generic: the product name (`ASSISTANT_NAME`) and the answer language
-(`ASSISTANT_LANGUAGE`) are configuration, not hard-coded strings.
+Admins manage everything on `/admin`: users, and one page per assistant
+(`/admin/assistants/:id`) for its identity, settings, rights matrix and
+knowledge base.
+
+`ASSISTANT_NAME` and `ASSISTANT_LANGUAGE` now only seed the *first* assistant on
+a fresh install; each assistant carries its own name and language afterwards.
 
 Status: working, deployed on Railway from the private GitHub repo
 `weirdfishes-co/aiassistant`. There is no mobile app — this is deliberately
@@ -36,7 +40,8 @@ src/
   auth.ts            magic-link tokens, cookie sessions, requireUser/requireAdmin
   llm.ts             OpenRouter client (OpenAI wire format), streams the answer
   models.ts          fetches + caches the OpenRouter model catalogue
-  settings.ts        admin-controlled runtime settings (typed, DB-backed)
+  settings.ts        admin-controlled runtime settings, per assistant
+  assistants.ts      slugs, per-assistant paths, first-run migration
   balance.ts         OpenRouter credit + key-limit status for /admin
   memory.ts          cross-conversation memory: extraction + prompt section
   compaction.ts      summarizes old turns once a conversation gets long
@@ -55,10 +60,12 @@ public/              styles.css, app.js, upload.js (frontend, no build step)
 scripts/build.mjs    esbuild bundle to dist/ + copy migrations
 scripts/entrypoint.sh  takes ownership of /data, then drops to the node user
 tests/               vitest: auth, content, context, settings, features
-                     (memory + compaction), views (admin balance panel), mail
+                     (memory + compaction), views, mail, assistants
+                     (slugs, rights matrix, isolation)
 instr.md             system prompt — the user owns its content
 instr.example.md     neutral starting prompt, safe to copy over instr.md
-context/*.md         knowledge base
+context/*.md         knowledge base seeded into a brand-new assistant
+<ASSISTANTS_DIR>/<slug>/   per-assistant instr.md + context/ (on the volume)
 ```
 
 ## Decisions (and why)
@@ -114,6 +121,22 @@ context/*.md         knowledge base
   configuration worked from a laptop. Port 443 has no such problem. `mail.ts`
   picks the transport: `BREVO_API_KEY` first, then `SMTP_HOST`, then the log
   (non-production only). SMTP is kept because it works fine locally.
+- **One directory per assistant** under `ASSISTANTS_DIR`
+  (`<slug>/instr.md`, `<slug>/context/*.md`). The slug is derived from the name
+  once, at creation, and never changes — it is both the URL (`/a/<slug>`) and
+  the directory name, so renaming an assistant must not move its files.
+  `assistantPaths()` validates the slug *and* checks the resolved path against
+  the root, the same defence `content.ts` applies to document names.
+- **Admins may use every assistant; everyone else needs a grant.** The
+  `assistant_users` table is the rights matrix and holds no rows for admins —
+  `canUseAssistant()` short-circuits on `isAdmin`. An assistant a user may not
+  use answers **404, not 403**, so the list of assistant names does not leak.
+- **Upgrading from the single-assistant era happens once, at boot.**
+  `bootstrapAssistants()` creates an assistant from `ASSISTANT_NAME`, copies the
+  old global `settings` rows onto it, attaches every conversation and memory
+  that still has `assistant_id IS NULL`, grants it to all existing users and
+  seeds its knowledge base from the old location. Migration `004` deliberately
+  leaves those columns nullable so the SQL stays pure and nothing is lost.
 - **Knowledge base on the volume, not in the image.** `/admin/content` lets an
   admin edit `instr.md` and the context documents. That only works durably when
   the files live outside the image, so the image sets `CONTEXT_DIR=/data/context`
@@ -133,22 +156,24 @@ context/*.md         knowledge base
 
 ## Pitfalls
 
-- `instr.md` belongs to the user (currently: a Dutch "Coach Suzy" prompt for
-  Talent&Pro, written before the app was made generic). **Never overwrite it** —
-  suggest at most. `instr.example.md` exists for that purpose.
-- That prompt is written for another platform and refers to tools
-  (`CoachSuzy_OphalenGeheugen`, `CoachSuzy_OpslaanGeheugen`) this app does not
-  have — though the app does now have a cross-conversation memory feature of its
-  own (`memory.ts`), which the prompt does not know about and does not need to.
-  It is also in Dutch, while `ASSISTANT_LANGUAGE` now defaults to English —
-  the two will fight until the prompt is replaced or the variable is set to
-  `Dutch`. The `{Global.X}` placeholders *are* resolved: `context.ts` replaces
-  them with `context/X.md`. As long as those files are missing they stay literal
-  in the prompt and a warning appears in the log.
+- `instr.md` in the repo belongs to the user and is only a **seed**: it is
+  copied into each newly created assistant, after which that assistant's own
+  copy under `ASSISTANTS_DIR` is what runs. Editing the repo file changes
+  nothing for an assistant that already exists. **Never overwrite it** — suggest
+  at most; `instr.example.md` exists for that purpose.
+- `{Global.X}` placeholders are resolved per assistant: `context.ts` replaces
+  them with that assistant's `context/X.md`. While a file is missing the
+  placeholder stays literal in the prompt and a warning appears in the log.
 - Two different kinds of memory, both database-backed and neither using tools.
   *Within* a conversation, `routes/chat.ts` replays the last `HISTORY_LIMIT`
   (40) messages. *Across* conversations, `memory.ts` extracts durable facts into
-  the `memories` table — off unless an admin enables it on `/admin`.
+  the `memories` table — off unless an admin enables it, and scoped to one
+  assistant.
+- **The prompt cache in `context.ts` is a Map keyed by instructions path**, not
+  a single entry. With one entry several assistants would evict each other on
+  every request and the OpenRouter prompt cache would never hit.
+- Every conversation and memory query carries **both** `user_id` and
+  `assistant_id`. Dropping either one crosses a boundary: users, or assistants.
 - Authorization on conversations lives in the SQL (`WHERE ... AND user_id = ?`),
   not in a separate check. Keep it that way for new queries.
 - File names on the knowledge base page come from a user. `safePath()` in

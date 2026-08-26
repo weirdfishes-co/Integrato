@@ -74,6 +74,8 @@ export interface Config {
   /** Writable location of the knowledge base; empty = the bundled files. */
   readonly contextDir: string | undefined;
   readonly instructionsPath: string | undefined;
+  /** Root under which each assistant gets its own knowledge-base directory. */
+  readonly assistantsDir: string;
   readonly logLevel: string;
   readonly openRouterApiKey: string;
   /** Fallback model; an admin can override it at runtime on /admin. */
@@ -132,6 +134,7 @@ export function loadConfig(env: Env = process.env): Config {
     databasePath: optional(env, 'DATABASE_PATH', './data/app.db'),
     contextDir: env.CONTEXT_DIR?.trim() || undefined,
     instructionsPath: env.INSTRUCTIONS_PATH?.trim() || undefined,
+    assistantsDir: optional(env, 'ASSISTANTS_DIR', './data/assistants'),
     logLevel: optional(env, 'LOG_LEVEL', 'info'),
     openRouterApiKey: required(env, 'OPENROUTER_API_KEY'),
     defaultModel: optional(env, 'OPENROUTER_MODEL', 'anthropic/claude-opus-5'),

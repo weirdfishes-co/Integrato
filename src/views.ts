@@ -1,7 +1,7 @@
 import type { Balance } from './balance.js';
 import { COMPACT_THRESHOLD } from './compaction.js';
 import type { DocumentSummary } from './content.js';
-import type { User } from './db/repo.js';
+import type { Assistant, User } from './db/repo.js';
 import type { ModelOption } from './models.js';
 import type { AssistantSettings } from './settings.js';
 
@@ -134,14 +134,26 @@ function formatBytes(bytes: number): string {
   return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} kB`;
 }
 
-export interface AdminPageOptions extends NoticeOptions {
-  /** Empty when the OpenRouter catalogue could not be reached. */
+export interface ContentPageOptions extends NoticeOptions {
+  /** URL prefix of this assistant's knowledge base, e.g. /admin/assistants/3/content. */
+  base: string;
+  assistant: Assistant;
+}
+
+export interface AssistantPageOptions extends NoticeOptions {
   models?: readonly ModelOption[];
   settings?: AssistantSettings;
-  /** null when OpenRouter could not be reached. */
-  balance?: Balance | null;
   effortLevels?: readonly string[];
   maxSearchResults?: number;
+  /** Every user, with a tick for those granted this assistant. */
+  users?: readonly User[];
+  grantedUserIds?: readonly number[];
+}
+
+export interface AdminPageOptions extends NoticeOptions {
+  /** null when OpenRouter could not be reached. */
+  balance?: Balance | null;
+  assistants?: readonly Assistant[];
 }
 
 export interface ViewOptions {
@@ -154,14 +166,24 @@ export interface ViewOptions {
 export interface Views {
   loginPage(options?: NoticeOptions & { email?: string }): string;
   linkSentPage(email: string): string;
-  chatPage(user: User): string;
+  /** Assistant list for a signed-in user; only what they may use. */
+  pickerPage(user: User, assistants: readonly Assistant[]): string;
+  chatPage(user: User, assistant: Assistant, showBackToPicker: boolean): string;
   adminPage(users: readonly User[], currentUser: User, options?: AdminPageOptions): string;
-  contentPage(documents: readonly DocumentSummary[], instructionsChars: number, options?: NoticeOptions): string;
+  /** One assistant: its identity, settings and who may use it. */
+  assistantPage(assistant: Assistant, options?: AssistantPageOptions): string;
+  contentPage(
+    documents: readonly DocumentSummary[],
+    instructionsChars: number,
+    options: ContentPageOptions,
+  ): string;
   editorPage(options: {
     heading: string;
     description: string;
     action: string;
     content: string;
+    /** Where Cancel and the breadcrumb go back to. */
+    base: string;
     notice?: NoticeOptions;
   }): string;
   errorPage(status: number, message: string): string;
@@ -204,20 +226,23 @@ export function createViews({ assistantName, assistantLanguage }: ViewOptions): 
       });
     },
 
-    chatPage(user) {
+    chatPage(user, assistant, showBackToPicker) {
+      const label = escapeHtml(assistant.name);
       return layout({
-        title: assistantName,
+        title: assistant.name,
         scripts: ['/app.js'],
-        body: `    <div class="app" data-email="${escapeHtml(user.email)}" data-assistant="${name}">
+        body: `    <div class="app" data-email="${escapeHtml(user.email)}" data-assistant="${label}"
+         data-slug="${escapeHtml(assistant.slug)}">
       <aside class="sidebar" id="sidebar">
         <div class="sidebar__head">
-          <span class="brand">${name}</span>
+          <span class="brand">${label}</span>
           <button type="button" class="icon-button" id="new-conversation" title="New conversation" aria-label="New conversation">+</button>
         </div>
         <nav class="conversations" id="conversations" aria-label="Conversations"></nav>
         <div class="sidebar__foot">
           <span class="muted small" title="${escapeHtml(user.email)}">${escapeHtml(user.email)}</span>
           <div class="row">
+            ${showBackToPicker ? '<a class="link small" href="/">Assistants</a>' : ''}
             ${user.isAdmin ? '<a class="link small" href="/admin">Admin</a>' : ''}
             <form method="post" action="/logout"><button type="submit" class="link small">Sign out</button></form>
           </div>
@@ -242,6 +267,42 @@ export function createViews({ assistantName, assistantLanguage }: ViewOptions): 
       });
     },
 
+    pickerPage(user, assistants) {
+      const cards =
+        assistants.length === 0
+          ? `        <p class="muted">You do not have access to an assistant yet. Ask an administrator to give you access.</p>`
+          : `        <ul class="picker">
+${assistants
+  .map(
+    (assistant) => `          <li>
+            <a class="picker__card" href="/a/${escapeHtml(assistant.slug)}">
+              <span class="picker__name">${escapeHtml(assistant.name)}</span>
+              ${
+                assistant.description.length > 0
+                  ? `<span class="picker__description">${escapeHtml(assistant.description)}</span>`
+                  : ''
+              }
+            </a>
+          </li>`,
+  )
+  .join('\n')}
+        </ul>`;
+
+      return layout({
+        title: `Assistants — ${assistantName}`,
+        body: `    <main class="page">
+      <header class="page__head">
+        <h1>Choose an assistant</h1>
+        <div class="row">
+          ${user.isAdmin ? '<a class="link" href="/admin">Admin</a>' : ''}
+          <form method="post" action="/logout"><button type="submit" class="link">Sign out</button></form>
+        </div>
+      </header>
+${cards}
+    </main>`,
+      });
+    },
+
     adminPage(users, currentUser, options = {}) {
       const rows = users
         .map(
@@ -260,9 +321,80 @@ export function createViews({ assistantName, assistantLanguage }: ViewOptions): 
         )
         .join('\n');
 
+      const assistants = options.assistants ?? [];
+      const assistantRows =
+        assistants.length === 0
+          ? `          <tr><td colspan="3" class="muted">No assistants yet. Create the first one below.</td></tr>`
+          : assistants
+              .map(
+                (assistant) => `          <tr>
+            <td><a class="link" href="/admin/assistants/${assistant.id}">${escapeHtml(assistant.name)}</a></td>
+            <td class="muted small">/a/${escapeHtml(assistant.slug)}</td>
+            <td class="actions"><a class="link small" href="/a/${escapeHtml(assistant.slug)}">Open</a></td>
+          </tr>`,
+              )
+              .join('\n');
+
+      return layout({
+        title: `Admin — ${assistantName}`,
+        body: `    <main class="page">
+      <header class="page__head">
+        <h1>Administration</h1>
+        <div class="row">
+          <a class="link" href="/">← Assistants</a>
+          <form method="post" action="/logout"><button type="submit" class="link">Sign out</button></form>
+        </div>
+      </header>
+      ${notice(options)}
+
+${balancePanel(options.balance)}
+
+      <section class="panel">
+        <h2>Assistants</h2>
+        <p class="muted small">Each assistant has its own knowledge base, settings and users.</p>
+        <table class="table">
+          <thead><tr><th>Name</th><th>Address</th><th></th></tr></thead>
+          <tbody>
+${assistantRows}
+          </tbody>
+        </table>
+
+        <form method="post" action="/admin/assistants" class="row row--form">
+          <label class="visually-hidden" for="new-assistant">Name</label>
+          <input id="new-assistant" name="name" type="text" required placeholder="New assistant name">
+          <button type="submit">Create</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Users</h2>
+        <p class="muted small">Admins may use every assistant. Other users are granted access per assistant.</p>
+        <form method="post" action="/admin/users" class="row row--form">
+          <label class="visually-hidden" for="new-email">Email address</label>
+          <input id="new-email" name="email" type="email" required placeholder="new@example.com">
+          <label class="checkbox"><input type="checkbox" name="is_admin" value="1"> Admin</label>
+          <button type="submit">Add</button>
+        </form>
+
+        <table class="table">
+          <thead>
+            <tr><th>Email</th><th>Role</th><th>Last seen</th><th></th></tr>
+          </thead>
+          <tbody>
+${rows}
+          </tbody>
+        </table>
+      </section>
+    </main>`,
+      });
+    },
+
+    assistantPage(assistant, options = {}) {
       const settings = options.settings;
       const models = options.models ?? [];
       const selected = settings?.model ?? '';
+      const granted = new Set(options.grantedUserIds ?? []);
+
       const modelField =
         models.length === 0
           ? `<input id="model" name="model" type="text" required value="${escapeHtml(selected)}"
@@ -288,24 +420,59 @@ ${(options.effortLevels ?? [])
   .join('\n')}
             </select>`;
 
+      const userRows = (options.users ?? [])
+        .map(
+          (user) => `          <tr>
+            <td>${escapeHtml(user.email)}</td>
+            <td>${
+              user.isAdmin
+                ? '<span class="muted small">admin — always allowed</span>'
+                : `<label class="checkbox"><input type="checkbox" name="user" value="${user.id}"${
+                    granted.has(user.id) ? ' checked' : ''
+                  }> may use this assistant</label>`
+            }</td>
+          </tr>`,
+        )
+        .join('\n');
+
       return layout({
-        title: `Admin — ${assistantName}`,
+        title: `${assistant.name} — admin`,
         body: `    <main class="page">
       <header class="page__head">
-        <h1>User management</h1>
+        <h1>${escapeHtml(assistant.name)}</h1>
         <div class="row">
-          <a class="link" href="/admin/content">Knowledge base</a>
-          <a class="link" href="/">← Back to the chat</a>
+          <a class="link" href="/admin/assistants/${assistant.id}/content">Knowledge base</a>
+          <a class="link" href="/a/${escapeHtml(assistant.slug)}">Open chat</a>
+          <a class="link" href="/admin">← Admin</a>
         </div>
       </header>
       ${notice(options)}
 
-${balancePanel(options.balance)}
+      <section class="panel">
+        <h2>Identity</h2>
+        <form method="post" action="/admin/assistants/${assistant.id}" class="settings">
+          <div class="field">
+            <label for="name">Name</label>
+            <input id="name" name="name" type="text" required value="${escapeHtml(assistant.name)}">
+          </div>
+          <div class="field">
+            <label for="description">Description</label>
+            <input id="description" name="description" type="text"
+                   value="${escapeHtml(assistant.description)}" placeholder="Shown on the assistant picker">
+          </div>
+          <div class="field">
+            <label for="language">Answer language</label>
+            <input id="language" name="language" type="text" required value="${escapeHtml(assistant.language)}">
+          </div>
+          <p class="muted small">Address: <code>/a/${escapeHtml(assistant.slug)}</code> — fixed once created.</p>
+          <button type="submit">Save identity</button>
+        </form>
+      </section>
 
       <section class="panel">
         <h2>Assistant settings</h2>
-        <p class="muted small">Applies to everyone, from the next message on. No restart needed.</p>
-        <form method="post" action="/admin/settings" class="settings">
+        <p class="muted small">Applies to this assistant only, from the next message on.</p>
+        <form method="post" action="/admin/assistants/${assistant.id}/settings" class="settings">
 
           <div class="field">
             <label for="model">Model</label>
@@ -361,7 +528,7 @@ ${balancePanel(options.balance)}
             <input type="checkbox" name="memory" value="1"${settings?.memory ? ' checked' : ''}>
             Remember users across conversations
           </label>
-          <p class="muted small">After each exchange, durable facts about the user are extracted and reused in later conversations. Costs one extra call per message.</p>
+          <p class="muted small">Facts are remembered per user <em>and</em> per assistant, so nothing crosses between assistants.</p>
 
           <label class="checkbox">
             <input type="checkbox" name="citations" value="1"${settings?.citations ? ' checked' : ''}>
@@ -379,39 +546,46 @@ ${balancePanel(options.balance)}
         </form>
       </section>
 
-      <h2>Users</h2>
-      <form method="post" action="/admin/users" class="row row--form">
-        <label class="visually-hidden" for="new-email">Email address</label>
-        <input id="new-email" name="email" type="email" required placeholder="new@example.com">
-        <label class="checkbox"><input type="checkbox" name="is_admin" value="1"> Admin</label>
-        <button type="submit">Add</button>
-      </form>
+      <section class="panel">
+        <h2>Who may use this assistant</h2>
+        <form method="post" action="/admin/assistants/${assistant.id}/users">
+          <table class="table">
+            <thead><tr><th>Email</th><th>Access</th></tr></thead>
+            <tbody>
+${userRows}
+            </tbody>
+          </table>
+          <button type="submit">Save access</button>
+        </form>
+      </section>
 
-      <table class="table">
-        <thead>
-          <tr><th>Email</th><th>Role</th><th>Last seen</th><th></th></tr>
-        </thead>
-        <tbody>
-${rows}
-        </tbody>
-      </table>
+      <section class="panel">
+        <h2>Delete</h2>
+        <p class="muted small">Removes this assistant with every conversation, memory and setting belonging to it. Its knowledge-base files stay on disk.</p>
+        <form method="post" action="/admin/assistants/${assistant.id}/delete"
+              onsubmit="return confirm('Delete ${escapeHtml(assistant.name)} and all its conversations?')">
+          <button type="submit" class="danger">Delete this assistant</button>
+        </form>
+      </section>
     </main>`,
       });
     },
 
-    contentPage(documents, instructionsChars, options = {}) {
+
+    contentPage(documents, instructionsChars, options) {
+      const base = options.base;
       const rows =
         documents.length === 0
           ? `          <tr><td colspan="4" class="muted">No documents yet. Create one or upload a .md file.</td></tr>`
           : documents
               .map(
                 (doc) => `          <tr>
-            <td><a class="link" href="/admin/content/edit?name=${encodeURIComponent(doc.name)}">${escapeHtml(
+            <td><a class="link" href="${base}/edit?name=${encodeURIComponent(doc.name)}">${escapeHtml(
               doc.name,
             )}</a></td>
             <td><code>{Global.${escapeHtml(doc.placeholder)}}</code></td>
             <td class="muted small">${formatBytes(doc.sizeBytes)} · ${escapeHtml(doc.modifiedAt)}</td>
-            <td class="actions"><form method="post" action="/admin/content/delete" onsubmit="return confirm('Permanently delete ${escapeHtml(
+            <td class="actions"><form method="post" action="${base}/delete" onsubmit="return confirm('Permanently delete ${escapeHtml(
               doc.name,
             )}?')"><input type="hidden" name="name" value="${escapeHtml(
               doc.name,
@@ -421,14 +595,16 @@ ${rows}
               .join('\n');
 
       return layout({
-        title: `Knowledge base — ${assistantName}`,
+        title: `Knowledge base — ${options.assistant.name}`,
         scripts: ['/upload.js'],
-        body: `    <main class="page">
+        body: `    <main class="page" data-upload="${escapeHtml(base)}/upload" data-base="${escapeHtml(base)}">
       <header class="page__head">
-        <h1>Knowledge base</h1>
+        <h1>Knowledge base — ${escapeHtml(options.assistant.name)}</h1>
         <div class="row">
-          <a class="link" href="/admin">Users</a>
-          <a class="link" href="/">← Back to the chat</a>
+          <a class="link" href="/admin/assistants/${options.assistant.id}">← ${escapeHtml(
+            options.assistant.name,
+          )}</a>
+          <a class="link" href="/admin">Admin</a>
         </div>
       </header>
       ${notice(options)}
@@ -439,7 +615,7 @@ ${rows}
             <h2>Base prompt</h2>
             <p class="muted small">instr.md — defines who ${name} is and how it works. ${instructionsChars} characters.</p>
           </div>
-          <a class="link" href="/admin/content/instructions">Edit</a>
+          <a class="link" href="${base}/instructions">Edit</a>
         </div>
       </section>
 
@@ -460,14 +636,14 @@ ${rows}
 
       <section class="panel">
         <h2>Add</h2>
-        <form method="post" action="/admin/content/new" class="row row--form">
+        <form method="post" action="${base}/new" class="row row--form">
           <label class="visually-hidden" for="new-name">File name</label>
           <input id="new-name" name="name" type="text" required placeholder="Guidelines.md"
                  pattern="[A-Za-z0-9_-]{1,64}\\.md">
           <button type="submit">New document</button>
         </form>
 
-        <form method="post" action="/admin/content/upload" id="upload-form" class="stack">
+        <form method="post" action="${base}/upload" id="upload-form" class="stack">
           <label for="upload">Or upload existing .md files</label>
           <input id="upload" type="file" accept=".md,text/markdown" multiple>
           <p class="muted small" id="upload-status" role="status"></p>
@@ -483,7 +659,7 @@ ${rows}
         body: `    <main class="page">
       <header class="page__head">
         <h1>${escapeHtml(options.heading)}</h1>
-        <a class="link" href="/admin/content">← Back to the knowledge base</a>
+        <a class="link" href="${options.base}">← Back to the knowledge base</a>
       </header>
       <p class="muted small">${escapeHtml(options.description)}</p>
       ${notice(options.notice ?? {})}
@@ -495,7 +671,7 @@ ${rows}
         )}</textarea>
         <div class="row">
           <button type="submit">Save</button>
-          <a class="link" href="/admin/content">Cancel</a>
+          <a class="link" href="${options.base}">Cancel</a>
         </div>
       </form>
     </main>`,

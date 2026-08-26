@@ -45,23 +45,25 @@ describe('historyWithSummary', () => {
 
 describe('memorySection', () => {
   let repo: Repo;
+  let assistantId: number;
 
   beforeEach(() => {
     repo = freshRepo();
+    assistantId = repo.createAssistant('coach', 'Coach', '', 'English').id;
   });
 
   it('returns null for a user with no memories', () => {
     const user = repo.upsertUser('a@example.com', false);
 
-    expect(memorySection(repo, user.id)).toBeNull();
+    expect(memorySection(repo, user.id, assistantId)).toBeNull();
   });
 
   it('lists the stored facts', () => {
     const user = repo.upsertUser('a@example.com', false);
-    repo.addMemory(user.id, 'Works as a recruiter at Acme.');
-    repo.addMemory(user.id, 'Prefers short answers.');
+    repo.addMemory(user.id, assistantId, 'Works as a recruiter at Acme.');
+    repo.addMemory(user.id, assistantId, 'Prefers short answers.');
 
-    const section = memorySection(repo, user.id);
+    const section = memorySection(repo, user.id, assistantId);
 
     expect(section).toContain('Works as a recruiter at Acme.');
     expect(section).toContain('Prefers short answers.');
@@ -70,9 +72,9 @@ describe('memorySection', () => {
   it('does not leak one user memories into another user prompt', () => {
     const alice = repo.upsertUser('alice@example.com', false);
     const bob = repo.upsertUser('bob@example.com', false);
-    repo.addMemory(alice.id, 'Works at Acme.');
+    repo.addMemory(alice.id, assistantId, 'Works at Acme.');
 
-    expect(memorySection(repo, bob.id)).toBeNull();
+    expect(memorySection(repo, bob.id, assistantId)).toBeNull();
   });
 });
 
@@ -100,7 +102,8 @@ describe('compactConversation', () => {
 
   function seed(count: number): number {
     const user = repo.upsertUser('a@example.com', false);
-    const conversation = repo.createConversation(user.id, 'Test');
+    const assistantId = repo.createAssistant('t', 'T', '', 'English').id;
+    const conversation = repo.createConversation(user.id, assistantId, 'Test');
     for (let index = 0; index < count; index += 1) {
       repo.addMessage(conversation.id, index % 2 === 0 ? 'user' : 'assistant', `message ${index}`);
     }

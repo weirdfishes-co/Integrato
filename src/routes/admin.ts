@@ -1,9 +1,18 @@
-import { Router, type Request } from 'express';
+import { Router, type Request, type Response } from 'express';
 
+import {
+  assistantPaths,
+  provisionAssistant,
+  slugify,
+  uniqueSlug,
+  MAX_DESCRIPTION_LENGTH,
+  MAX_NAME_LENGTH,
+} from '../assistants.js';
 import type { Auth } from '../auth.js';
 import { fetchBalance } from '../balance.js';
 import { EFFORT_LEVELS, normalizeEmail, type Config, type Effort } from '../config.js';
-import type { Repo } from '../db/repo.js';
+import type { ContentPaths } from '../content.js';
+import type { Assistant, Repo } from '../db/repo.js';
 import { logger } from '../logger.js';
 import { listModels, type ModelOption } from '../models.js';
 import {
@@ -23,6 +32,8 @@ export interface AdminRouteDeps {
   repo: Repo;
   auth: Auth;
   views: Views;
+  /** Bundled files a brand-new assistant starts from. */
+  bundledContent: ContentPaths;
 }
 
 function checked(body: unknown, field: string): boolean {
@@ -35,7 +46,23 @@ function text(body: unknown, field: string): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-export function createAdminRouter({ config, repo, auth, views }: AdminRouteDeps): Router {
+/** A checkbox group posts one value or many; normalize to a list of ids. */
+function idList(body: unknown, field: string): number[] {
+  if (typeof body !== 'object' || body === null) return [];
+  const raw = (body as Record<string, unknown>)[field];
+  const values = Array.isArray(raw) ? raw : raw === undefined ? [] : [raw];
+  return values
+    .map((value) => Number.parseInt(String(value), 10))
+    .filter((value) => Number.isInteger(value) && value > 0);
+}
+
+export function createAdminRouter({
+  config,
+  repo,
+  auth,
+  views,
+  bundledContent,
+}: AdminRouteDeps): Router {
   const router = Router();
 
   /**
@@ -55,15 +82,37 @@ export function createAdminRouter({ config, repo, auth, views }: AdminRouteDeps)
     req: Request,
     notice: { message?: string; error?: string } = {},
   ): Promise<string> {
-    const [models, balance] = await Promise.all([modelChoices(), fetchBalance(config)]);
     return views.adminPage(repo.listUsers(), req.user!, {
       ...notice,
-      models,
-      balance,
-      settings: loadSettings(repo, config),
+      balance: await fetchBalance(config),
+      assistants: repo.listAssistants(),
+    });
+  }
+
+  async function renderAssistant(
+    assistant: Assistant,
+    notice: { message?: string; error?: string } = {},
+  ): Promise<string> {
+    return views.assistantPage(assistant, {
+      ...notice,
+      models: await modelChoices(),
+      settings: loadSettings(repo, config, assistant.id),
       effortLevels: EFFORT_LEVELS,
       maxSearchResults: MAX_SEARCH_RESULTS,
+      users: repo.listUsers(),
+      grantedUserIds: repo.listGrantedUserIds(assistant.id),
     });
+  }
+
+  /** Resolves :id, answering with a 404 page when it is not an assistant. */
+  function resolveAssistant(req: Request, res: Response): Assistant | null {
+    const id = Number.parseInt(String(req.params.id ?? ''), 10);
+    const assistant = Number.isInteger(id) ? repo.findAssistantById(id) : null;
+    if (!assistant) {
+      res.status(404).type('html').send(views.errorPage(404, 'This assistant does not exist.'));
+      return null;
+    }
+    return assistant;
   }
 
   router.get('/admin', auth.requireAdmin, async (req, res) => {
@@ -71,13 +120,68 @@ export function createAdminRouter({ config, repo, auth, views }: AdminRouteDeps)
     res.type('html').send(await renderAdmin(req, { message }));
   });
 
-  router.post('/admin/settings', auth.requireAdmin, async (req, res) => {
-    const current = loadSettings(repo, config);
+  // ---- assistants ---------------------------------------------------------
+
+  router.post('/admin/assistants', auth.requireAdmin, async (req, res, next) => {
+    try {
+      const name = text(req.body, 'name');
+      if (name.length === 0 || name.length > MAX_NAME_LENGTH) {
+        res
+          .status(400)
+          .type('html')
+          .send(await renderAdmin(req, { error: 'Give the assistant a name.' }));
+        return;
+      }
+
+      const slug = uniqueSlug(slugify(name), (candidate) => repo.findAssistantBySlug(candidate) !== null);
+      const assistant = repo.createAssistant(slug, name, '', config.assistantLanguage);
+      await provisionAssistant(config, assistant, bundledContent);
+
+      logger.info({ by: req.user!.id, slug, name }, 'assistant created');
+      res.redirect(`/admin/assistants/${assistant.id}`);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get('/admin/assistants/:id', auth.requireAdmin, async (req, res) => {
+    const assistant = resolveAssistant(req, res);
+    if (!assistant) return;
+    const message = typeof req.query.ok === 'string' ? req.query.ok : undefined;
+    res.type('html').send(await renderAssistant(assistant, { message }));
+  });
+
+  router.post('/admin/assistants/:id', auth.requireAdmin, async (req, res) => {
+    const assistant = resolveAssistant(req, res);
+    if (!assistant) return;
+
+    const name = text(req.body, 'name');
+    const description = text(req.body, 'description').slice(0, MAX_DESCRIPTION_LENGTH);
+    const language = text(req.body, 'language');
+
+    if (name.length === 0 || name.length > MAX_NAME_LENGTH || language.length === 0) {
+      res
+        .status(400)
+        .type('html')
+        .send(await renderAssistant(assistant, { error: 'A name and an answer language are required.' }));
+      return;
+    }
+
+    repo.updateAssistant(assistant.id, name, description, language);
+    logger.info({ by: req.user!.id, assistantId: assistant.id }, 'assistant updated');
+    res.redirect(`/admin/assistants/${assistant.id}?ok=${encodeURIComponent('Identity saved.')}`);
+  });
+
+  router.post('/admin/assistants/:id/settings', auth.requireAdmin, async (req, res) => {
+    const assistant = resolveAssistant(req, res);
+    if (!assistant) return;
+
+    const current = loadSettings(repo, config, assistant.id);
     const model = text(req.body, 'model');
     const effort = EFFORT_LEVELS.find((level): level is Effort => level === text(req.body, 'effort'));
 
     if (model.length === 0 || model.length > MAX_MODEL_LENGTH) {
-      res.status(400).type('html').send(await renderAdmin(req, { error: 'Choose a model.' }));
+      res.status(400).type('html').send(await renderAssistant(assistant, { error: 'Choose a model.' }));
       return;
     }
 
@@ -98,10 +202,41 @@ export function createAdminRouter({ config, repo, auth, views }: AdminRouteDeps)
       compaction: checked(req.body, 'compaction'),
     };
 
-    saveSettings(repo, settings);
-    logger.info({ by: req.user!.id, model: settings.model }, 'settings changed');
-    res.redirect(`/admin?ok=${encodeURIComponent('Settings saved.')}`);
+    saveSettings(repo, assistant.id, settings);
+    logger.info({ by: req.user!.id, assistantId: assistant.id, model }, 'assistant settings changed');
+    res.redirect(`/admin/assistants/${assistant.id}?ok=${encodeURIComponent('Settings saved.')}`);
   });
+
+  router.post('/admin/assistants/:id/users', auth.requireAdmin, (req, res) => {
+    const assistant = resolveAssistant(req, res);
+    if (!assistant) return;
+
+    // Admins are allowed everywhere and are never stored as grants, so ticking
+    // them would only create rows that nothing reads.
+    const admins = new Set(repo.listUsers().filter((user) => user.isAdmin).map((user) => user.id));
+    const userIds = idList(req.body, 'user').filter((id) => !admins.has(id));
+
+    repo.setAssistantUsers(assistant.id, userIds);
+    logger.info({ by: req.user!.id, assistantId: assistant.id, users: userIds.length }, 'access changed');
+    res.redirect(`/admin/assistants/${assistant.id}?ok=${encodeURIComponent('Access saved.')}`);
+  });
+
+  router.post('/admin/assistants/:id/delete', auth.requireAdmin, (req, res) => {
+    const assistant = resolveAssistant(req, res);
+    if (!assistant) return;
+
+    // The files are left alone on purpose: a mistaken click should not destroy
+    // a knowledge base that took work to write.
+    const { contextDir } = assistantPaths(config, assistant.slug);
+    repo.deleteAssistant(assistant.id);
+    logger.info(
+      { by: req.user!.id, assistantId: assistant.id, keptFiles: contextDir },
+      'assistant deleted',
+    );
+    res.redirect(`/admin?ok=${encodeURIComponent(`${assistant.name} has been deleted.`)}`);
+  });
+
+  // ---- users --------------------------------------------------------------
 
   router.post('/admin/users', auth.requireAdmin, async (req, res) => {
     const email = normalizeEmail(text(req.body, 'email'));

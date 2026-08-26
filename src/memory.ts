@@ -40,8 +40,8 @@ export interface MemoryDeps {
 }
 
 /** The block prepended to the system prompt, or null when there is nothing yet. */
-export function memorySection(repo: Repo, userId: number): string | null {
-  const memories = repo.listMemories(userId, MAX_MEMORIES_IN_PROMPT);
+export function memorySection(repo: Repo, userId: number, assistantId: number): string | null {
+  const memories = repo.listMemories(userId, assistantId, MAX_MEMORIES_IN_PROMPT);
   if (memories.length === 0) return null;
 
   const lines = memories.map((memory) => `- ${memory.content}`).join('\n');
@@ -76,6 +76,7 @@ export async function rememberExchange(
   { repo, chat }: MemoryDeps,
   settings: AssistantSettings,
   userId: number,
+  assistantId: number,
   question: string,
   answer: string,
 ): Promise<void> {
@@ -92,15 +93,17 @@ export async function rememberExchange(
     const facts = parseFacts(raw);
     if (facts.length === 0) return;
 
-    const known = new Set(repo.listMemories(userId, 200).map((memory) => memory.content.toLowerCase()));
+    const known = new Set(
+      repo.listMemories(userId, assistantId, 200).map((memory) => memory.content.toLowerCase()),
+    );
     const fresh = facts.filter((fact) => !known.has(fact.toLowerCase()));
     for (const fact of fresh) {
-      repo.addMemory(userId, fact);
+      repo.addMemory(userId, assistantId, fact);
     }
     if (fresh.length > 0) {
-      logger.info({ userId, stored: fresh.length }, 'memories stored');
+      logger.info({ userId, assistantId, stored: fresh.length }, 'memories stored');
     }
   } catch (error) {
-    logger.warn({ err: error, userId }, 'memory extraction failed');
+    logger.warn({ err: error, userId, assistantId }, 'memory extraction failed');
   }
 }

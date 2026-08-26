@@ -47,7 +47,8 @@ function languageRule(language: string): string {
   );
 }
 
-let cache: CacheEntry | null = null;
+/** Keyed by instructions path: one entry per assistant, not one globally. */
+const cache = new Map<string, CacheEntry>();
 
 async function readIfExists(path: string): Promise<string | null> {
   try {
@@ -120,8 +121,9 @@ export async function buildSystemPrompt(sources: PromptSources): Promise<string>
   const contextFiles = await listContextFiles(contextDir);
   const citations = sources.citations === true;
   const current = `${assistantName}|${language}|${citations}|${await fingerprint([instructionsPath, ...contextFiles])}`;
-  if (cache && cache.fingerprint === current) {
-    return cache.prompt;
+  const cached = cache.get(instructionsPath);
+  if (cached && cached.fingerprint === current) {
+    return cached.prompt;
   }
 
   const instructions = (await readIfExists(instructionsPath))?.trim();
@@ -158,12 +160,12 @@ export async function buildSystemPrompt(sources: PromptSources): Promise<string>
   }
 
   const prompt = sections.join('\n\n');
-  cache = { fingerprint: current, prompt };
+  cache.set(instructionsPath, { fingerprint: current, prompt });
   logger.info({ contextFiles: contextFiles.length, promptChars: prompt.length }, 'system prompt built');
   return prompt;
 }
 
 /** Tests only: clears the cache so the next build reads from disk again. */
 export function resetPromptCache(): void {
-  cache = null;
+  cache.clear();
 }

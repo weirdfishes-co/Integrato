@@ -14,40 +14,51 @@ function freshRepo(): Repo {
   return createRepo(openDatabase(join(dir, 'test.db')));
 }
 
+/** Settings are per assistant, so every test needs one to hang them on. */
+function freshAssistant(repo: Repo, slug = 'coach'): number {
+  return repo.createAssistant(slug, 'Coach', '', 'English').id;
+}
+
 /** Only the fields loadSettings reads. */
 const config = { defaultModel: 'anthropic/claude-opus-5', effort: 'high' } as Config;
 
 describe('settings storage', () => {
   let repo: Repo;
 
+  let assistantId: number;
+
   beforeEach(() => {
     repo = freshRepo();
+    assistantId = freshAssistant(repo);
   });
 
   it('overwrites an existing setting instead of inserting a second row', () => {
-    repo.setSetting('model', 'openai/gpt-5');
-    repo.setSetting('model', 'google/gemini-2.5-pro');
+    repo.setSetting(assistantId, 'model', 'openai/gpt-5');
+    repo.setSetting(assistantId, 'model', 'google/gemini-2.5-pro');
 
-    expect(repo.getSetting('model')).toBe('google/gemini-2.5-pro');
+    expect(repo.getSetting(assistantId, 'model')).toBe('google/gemini-2.5-pro');
   });
 });
 
 describe('loadSettings', () => {
   let repo: Repo;
 
+  let assistantId: number;
+
   beforeEach(() => {
     repo = freshRepo();
+    assistantId = freshAssistant(repo);
   });
 
   it('falls back to the environment when no admin has saved anything', () => {
-    const settings = loadSettings(repo, config);
+    const settings = loadSettings(repo, config, assistantId);
 
     expect(settings.model).toBe('anthropic/claude-opus-5');
     expect(settings.effort).toBe('high');
   });
 
   it('defaults every optional feature to off', () => {
-    const settings = loadSettings(repo, config);
+    const settings = loadSettings(repo, config, assistantId);
 
     expect(settings.showThinking).toBe(false);
     expect(settings.webSearch).toBe(false);
@@ -57,19 +68,19 @@ describe('loadSettings', () => {
   });
 
   it('prefers the admin choice over the configured default', () => {
-    repo.setSetting('model', 'openai/gpt-5');
+    repo.setSetting(assistantId, 'model', 'openai/gpt-5');
 
-    expect(loadSettings(repo, config).model).toBe('openai/gpt-5');
+    expect(loadSettings(repo, config, assistantId).model).toBe('openai/gpt-5');
   });
 
   it('ignores an effort value that is not a known level', () => {
-    repo.setSetting('effort', 'turbo');
+    repo.setSetting(assistantId, 'effort', 'turbo');
 
-    expect(loadSettings(repo, config).effort).toBe('high');
+    expect(loadSettings(repo, config, assistantId).effort).toBe('high');
   });
 
   it('round-trips a full settings object', () => {
-    saveSettings(repo, {
+    saveSettings(repo, assistantId, {
       model: 'openai/gpt-5',
       effort: 'max',
       showThinking: true,
@@ -82,7 +93,7 @@ describe('loadSettings', () => {
       compaction: true,
     });
 
-    expect(loadSettings(repo, config)).toEqual({
+    expect(loadSettings(repo, config, assistantId)).toEqual({
       model: 'openai/gpt-5',
       effort: 'max',
       showThinking: true,
@@ -97,9 +108,9 @@ describe('loadSettings', () => {
   });
 
   it('caps the result count at the maximum', () => {
-    repo.setSetting('web_search_max_results', '9999');
+    repo.setSetting(assistantId, 'web_search_max_results', '9999');
 
-    expect(loadSettings(repo, config).webSearchMaxResults).toBe(20);
+    expect(loadSettings(repo, config, assistantId).webSearchMaxResults).toBe(20);
   });
 });
 

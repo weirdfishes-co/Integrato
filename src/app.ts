@@ -6,7 +6,7 @@ import express, { type Express, type NextFunction, type Request, type Response }
 
 import { createAuth } from './auth.js';
 import type { Config } from './config.js';
-import { createContentStore, type ContentPaths } from './content.js';
+import type { ContentPaths } from './content.js';
 import { openDatabase, type Db } from './db/index.js';
 import { createRepo, type Repo } from './db/repo.js';
 import { createChatClient } from './llm.js';
@@ -16,7 +16,7 @@ import { createAdminRouter } from './routes/admin.js';
 import { createAuthRouter } from './routes/auth.js';
 import { createChatRouter } from './routes/chat.js';
 import { createContentRouter } from './routes/content.js';
-import { createViews, instructionsDescription } from './views.js';
+import { createViews } from './views.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 /** dist/ and src/ both sit one level below the project root. */
@@ -81,16 +81,9 @@ export function createApp(config: Config): App {
   });
 
   app.use(createAuthRouter({ config, repo, auth, mailer, views }));
-  app.use(createAdminRouter({ config, repo, auth, views }));
-  app.use(
-    createContentRouter({
-      auth,
-      store: createContentStore(content),
-      views,
-      instructionsDescription: instructionsDescription(branding),
-    }),
-  );
-  app.use(createChatRouter({ config, repo, auth, chat, views, ...content }));
+  app.use(createAdminRouter({ config, repo, auth, views, bundledContent }));
+  app.use('/admin/assistants/:id/content', createContentRouter({ auth, views, config, repo }));
+  app.use(createChatRouter({ config, repo, auth, chat, views }));
 
   app.use((req, res) => {
     if (req.path.startsWith('/api/')) {

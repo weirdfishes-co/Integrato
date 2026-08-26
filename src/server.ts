@@ -1,19 +1,23 @@
 import { createApp } from './app.js';
+import { bootstrapAssistants } from './assistants.js';
 import { loadConfig } from './config.js';
-import { seedContent } from './content.js';
 import { logger } from './logger.js';
-import { loadSettings } from './settings.js';
 
 const config = loadConfig();
 const { express: app, db, repo, content, bundledContent } = createApp(config);
 
-// If CONTEXT_DIR/INSTRUCTIONS_PATH point at an empty volume, the bundled
-// knowledge base is copied there once.
-await seedContent(bundledContent, content);
+// Creates the first assistant on a fresh install, and on an upgrade moves the
+// single knowledge base, settings, conversations and memories onto it.
+const first = await bootstrapAssistants({ repo, config, bundled: bundledContent, legacy: content });
 
 const server = app.listen(config.port, '0.0.0.0', () => {
   logger.info(
-    { port: config.port, appUrl: config.appUrl, model: loadSettings(repo, config).model, assistant: config.assistantName },
+    {
+      port: config.port,
+      appUrl: config.appUrl,
+      assistants: repo.listAssistants().length,
+      first: first.slug,
+    },
     'server started',
   );
 });

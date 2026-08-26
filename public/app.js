@@ -18,6 +18,9 @@ const els = {
 
 /** Label above assistant messages; set server-side from ASSISTANT_NAME. */
 const assistantName = document.querySelector('.app')?.dataset.assistant || 'Assistant';
+/** Every API call is scoped to the assistant this page belongs to. */
+const assistantSlug = document.querySelector('.app')?.dataset.slug || '';
+const apiBase = `/api/a/${encodeURIComponent(assistantSlug)}`;
 
 const state = {
   conversations: [],
@@ -161,14 +164,14 @@ function closeSidebarOnMobile() {
 // ---------- actions ----------
 
 async function loadConversations() {
-  const data = await api('/api/conversations');
+  const data = await api(`${apiBase}/conversations`);
   state.conversations = data.conversations;
   renderConversations();
   return state.conversations;
 }
 
 async function openConversation(id) {
-  const data = await api(`/api/conversations/${id}`);
+  const data = await api(`${apiBase}/conversations/${id}`);
   state.activeId = data.conversation.id;
   els.title.textContent = data.conversation.title;
   els.messages.replaceChildren();
@@ -187,7 +190,7 @@ async function openConversation(id) {
 }
 
 async function createConversation() {
-  const data = await api('/api/conversations', { method: 'POST' });
+  const data = await api(`${apiBase}/conversations`, { method: 'POST' });
   state.conversations.unshift(data.conversation);
   state.activeId = data.conversation.id;
   els.title.textContent = data.conversation.title;
@@ -201,7 +204,7 @@ async function createConversation() {
 async function deleteConversation(conversation) {
   if (!window.confirm(`Delete "${conversation.title}"?`)) return;
 
-  await api(`/api/conversations/${conversation.id}`, { method: 'DELETE' });
+  await api(`${apiBase}/conversations/${conversation.id}`, { method: 'DELETE' });
   state.conversations = state.conversations.filter((item) => item.id !== conversation.id);
 
   if (state.activeId === conversation.id) {
@@ -261,7 +264,7 @@ async function sendPrompt(text) {
   setBusy(true);
 
   try {
-    const response = await fetch(`/api/conversations/${state.activeId}/messages`, {
+    const response = await fetch(`${apiBase}/conversations/${state.activeId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt: text }),

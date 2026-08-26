@@ -1,17 +1,17 @@
 # AI Assistant
 
-A configurable chat assistant on any model OpenRouter offers. Users sign in with a magic link
-sent to their email address, their conversations are stored in SQLite and are
-available again after signing in later. The personality and instructions live in
-`instr.md`; the knowledge base is the set of markdown files in `context/`.
+A host for several configurable chat assistants, on any model OpenRouter offers.
+Each assistant has its own instructions, knowledge base, model settings and list
+of users. People sign in with a magic link, pick an assistant they have access
+to, and their conversations are kept per assistant in SQLite.
 
 - **Stack**: Node 22, TypeScript, Express 5, SQLite (better-sqlite3)
 - **Model access**: OpenRouter (OpenAI-compatible API), one key for every model
 - **Email**: Brevo HTTP API, with SMTP as an alternative
 - **Hosting**: Railway (Dockerfile + persistent volume for the database)
 - **Auth**: magic link over email, 30-day cookie session
-- **Admin**: `/admin` for users, model, assistant settings and the OpenRouter
-  balance; `/admin/content` for the knowledge base
+- **Admin**: `/admin` for users, assistants and the OpenRouter balance;
+  `/admin/assistants/:id` for one assistant's settings, access and knowledge base
 
 The product name and the answer language are configuration, not code: set
 `ASSISTANT_NAME` and `ASSISTANT_LANGUAGE` and the interface, the sign-in email
@@ -57,14 +57,40 @@ npm run typecheck   # tsc --noEmit
 npm test            # vitest
 ```
 
+## Assistants
+
+An admin creates assistants on **`/admin`**. Each one gets:
+
+- its own **address**, `/a/<slug>`, derived from the name when it is created
+- its own **instructions and knowledge base**, under
+  `<ASSISTANTS_DIR>/<slug>/instr.md` and `<ASSISTANTS_DIR>/<slug>/context/*.md`
+- its own **model, effort, web search, memory, citations and compaction**
+- its own **user list** — the rights matrix on the assistant's admin page
+
+**Access.** Admins may use every assistant. Everyone else sees only what they
+were granted; an assistant a user may not use answers 404, so the names of other
+assistants are not exposed. After signing in a user lands on a picker showing
+their assistants — or goes straight into the chat when they have exactly one.
+
+**Isolation.** Conversations and remembered facts are stored per user *and* per
+assistant. Nothing a user tells one assistant reaches another.
+
+**Deleting** an assistant removes its conversations, memories, settings and
+grants. Its knowledge-base files are deliberately left on disk, so a mistaken
+click does not destroy documents that took work to write.
+
 ## Changing the instructions and context
 
-- **`instr.md`** is the system prompt. The rule "always answer in
-  `ASSISTANT_LANGUAGE`" is appended automatically — you do not need to put it in
+Each assistant has its own copy of these; edit them on its admin page under
+**Knowledge base**. The files in the repo are only the seed for a *newly
+created* assistant.
+
+- **`instr.md`** is the system prompt. The rule "always answer in the
+  assistant's language" is appended automatically — you do not need to put it in
   there. [`instr.example.md`](instr.example.md) holds a neutral starting point.
 - **`context/*.md`** are sent along as knowledge base, alphabetically by file
-  name. The directory ships empty; add documents through `/admin/content` or by
-  dropping `.md` files in there.
+  name. The directory ships empty; add documents on the assistant's Knowledge
+  base page.
 - A placeholder such as `{Global.Guidelines}` in `instr.md` is replaced by the
   content of `context/Guidelines.md`.
 
@@ -73,7 +99,8 @@ needed.
 
 ### Through the admin page
 
-An admin does not need file access for this: on **`/admin/content`** you can read
+An admin does not need file access for this: on an assistant's **Knowledge
+base** page (`/admin/assistants/:id/content`) you can read
 and edit the base prompt, and create, upload (several `.md` files at once), edit
 and delete context documents. The matching `{Global.…}` placeholder is listed
 next to each document.
@@ -128,12 +155,14 @@ says so and the rest of the page still works.
 
 ## Assistant settings
 
-Everything below lives on **`/admin`** and is stored in the database, so a change
-applies from the next message on — no restart, no redeploy.
+Everything below lives on an assistant's page under **`/admin`** and is stored in
+the database *per assistant*, so a change applies from the next message on — no
+restart, no redeploy.
 
 | Setting | What it does |
 | --- | --- |
 | **Model** | Any model OpenRouter offers, with context size and price shown |
+| **Identity** | The assistant's name, description and answer language |
 | **Reasoning effort** | `low` … `max`. Models without reasoning support ignore it |
 | **Show thinking** | Streams the model's reasoning above the answer, collapsed |
 | **Web search** | Look things up beyond the knowledge base; billed per search |
@@ -197,11 +226,12 @@ which the `Retry-After` header times.
    | `SMTP_PORT` / `SMTP_SECURE` | no | Default 587 with STARTTLS; `SMTP_SECURE=true` for port 465 |
    | `SMTP_USER` / `SMTP_PASS` | no | Leave empty for a relay without authentication |
    | `MAIL_FROM` | no | Sender, e.g. `AI Assistant <noreply@yourdomain.com>` |
-   | `ASSISTANT_NAME` | no | Default `AI Assistant`; shown in the UI and the sign-in email |
-   | `ASSISTANT_LANGUAGE` | no | Default `English`; the answer language rule appended to the prompt |
+   | `ASSISTANT_NAME` | no | Name of the *first* assistant on a fresh install, and the sign-in email's sender name |
+   | `ASSISTANT_LANGUAGE` | no | Answer language of the first assistant; each assistant carries its own afterwards |
    | `APP_URL` | yes | Public URL, e.g. `https://assistant.up.railway.app`. Magic links are built on this; `https://` sets the Secure flag on the cookie |
    | `DATABASE_PATH` | no | Default `/data/app.db` in the image |
-   | `CONTEXT_DIR` / `INSTRUCTIONS_PATH` | no | Default `/data/context` and `/data/instr.md` in the image — keep these on the volume, or admin changes vanish on every deploy |
+   | `ASSISTANTS_DIR` | no | Default `/data/assistants` in the image — one directory per assistant. Keep it on the volume, or every knowledge base is lost on deploy |
+   | `CONTEXT_DIR` / `INSTRUCTIONS_PATH` | no | The pre-multi-assistant knowledge base, read once when upgrading an existing install |
    | `OPENROUTER_MODEL` | no | Starting model, default `anthropic/claude-opus-5`. An admin's choice on `/admin` overrides it |
    | `MODEL_EFFORT` / `MODEL_MAX_TOKENS` | no | Default `high` and `8000`. Effort is `low`–`max`; only reasoning models act on it |
    | `OPENROUTER_SITE_URL` / `OPENROUTER_SITE_NAME` | no | Optional attribution on the openrouter.ai rankings |
@@ -248,8 +278,10 @@ docker run --rm -p 3000:3000 \
 - The knowledge base page only writes inside the context directory: file names
   are validated *and* the resolved path is checked against the base directory,
   so `../` or an absolute path cannot write outside it.
-- Remembered facts are per user and read with the owner in the SQL, exactly like
-  conversations, so one user's memory never reaches another's prompt.
+- Remembered facts and conversations are read with both the owner and the
+  assistant in the SQL, so nothing crosses between users or between assistants.
+- An assistant a user may not use is indistinguishable from one that does not
+  exist: both answer 404.
 - The server runs as the unprivileged `node` user; only the entrypoint that
   takes ownership of the volume runs as root, for a moment at startup.
 - Secrets stay in the environment: `.env`, the database and the `data/` directory

@@ -177,10 +177,12 @@ export async function seedContent(bundled: ContentPaths, target: ContentPaths): 
   if (existing.some((name) => FILENAME_PATTERN.test(name))) return;
 
   const source = await readdir(bundled.contextDir).catch(() => [] as string[]);
-  for (const name of source.filter((entry) => FILENAME_PATTERN.test(entry))) {
+  const documents = source.filter((entry) => FILENAME_PATTERN.test(entry));
+  for (const name of documents) {
     await copyFile(join(bundled.contextDir, name), join(target.contextDir, name));
   }
-  if (source.length > 0) {
-    logger.info({ dir: target.contextDir, files: source.length }, 'context directory seeded');
+  // Count what was actually copied: the source may hold only a .gitkeep.
+  if (documents.length > 0) {
+    logger.info({ dir: target.contextDir, files: documents.length }, 'context directory seeded');
   }
 }

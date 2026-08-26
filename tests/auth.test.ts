@@ -89,7 +89,8 @@ describe('users and conversations', () => {
     const repo = freshRepo();
     const owner = repo.upsertUser('a@example.com', false);
     const other = repo.upsertUser('b@example.com', false);
-    const conversation = repo.createConversation(owner.id, 'Private');
+    const assistant = repo.createAssistant('a', 'A', '', 'English');
+    const conversation = repo.createConversation(owner.id, assistant.id, 'Private');
 
     expect(repo.findConversation(conversation.id, other.id)).toBeNull();
     expect(repo.findConversation(conversation.id, owner.id)?.title).toBe('Private');
@@ -98,7 +99,8 @@ describe('users and conversations', () => {
   it('keeps messages in order and removes them with the conversation', () => {
     const repo = freshRepo();
     const user = repo.upsertUser('a@example.com', false);
-    const conversation = repo.createConversation(user.id, 'Test');
+    const assistant = repo.createAssistant('a', 'A', '', 'English');
+    const conversation = repo.createConversation(user.id, assistant.id, 'Test');
 
     repo.addMessage(conversation.id, 'user', 'Hello');
     repo.addMessage(conversation.id, 'assistant', 'Hi!');

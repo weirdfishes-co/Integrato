@@ -39,7 +39,8 @@ COPY context ./context
 # to live on the volume — otherwise every change is gone on the next deploy.
 ENV DATABASE_PATH=/data/app.db \
     CONTEXT_DIR=/data/context \
-    INSTRUCTIONS_PATH=/data/instr.md
+    INSTRUCTIONS_PATH=/data/instr.md \
+    ASSISTANTS_DIR=/data/assistants
 RUN mkdir -p /data && chown -R node:node /data /app/context /app/instr.md
 
 # The volume is mounted over /data at runtime and arrives owned by root, so the

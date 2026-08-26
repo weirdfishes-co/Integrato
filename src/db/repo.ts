@@ -14,12 +14,22 @@ export interface User {
   lastSeenAt: string | null;
 }
 
+export interface Assistant {
+  id: number;
+  slug: string;
+  name: string;
+  description: string;
+  language: string;
+  createdAt: string;
+}
+
 export interface Conversation {
   id: number;
   userId: number;
   title: string;
   createdAt: string;
   updatedAt: string;
+  assistantId: number;
   /** Running summary of the compacted-away messages; null when none. */
   summary: string | null;
   /** Id of the last message the summary covers. */
@@ -29,6 +39,7 @@ export interface Conversation {
 export interface Memory {
   id: number;
   userId: number;
+  assistantId: number;
   content: string;
   createdAt: string;
 }
@@ -51,9 +62,19 @@ interface UserRow {
   last_seen_at: string | null;
 }
 
+interface AssistantRow {
+  id: number;
+  slug: string;
+  name: string;
+  description: string;
+  language: string;
+  created_at: string;
+}
+
 interface ConversationRow {
   id: number;
   user_id: number;
+  assistant_id: number;
   title: string;
   created_at: string;
   updated_at: string;
@@ -64,6 +85,7 @@ interface ConversationRow {
 interface MemoryRow {
   id: number;
   user_id: number;
+  assistant_id: number;
   content: string;
   created_at: string;
 }
@@ -86,10 +108,22 @@ function toUser(row: UserRow): User {
   };
 }
 
+function toAssistant(row: AssistantRow): Assistant {
+  return {
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    description: row.description,
+    language: row.language,
+    createdAt: row.created_at,
+  };
+}
+
 function toConversation(row: ConversationRow): Conversation {
   return {
     id: row.id,
     userId: row.user_id,
+    assistantId: row.assistant_id,
     title: row.title,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -102,6 +136,7 @@ function toMemory(row: MemoryRow): Memory {
   return {
     id: row.id,
     userId: row.user_id,
+    assistantId: row.assistant_id,
     content: row.content,
     createdAt: row.created_at,
   };
@@ -225,10 +260,10 @@ export function createRepo(db: Db) {
 
     // ---- conversations ----------------------------------------------------
 
-    createConversation(userId: number, title: string): Conversation {
+    createConversation(userId: number, assistantId: number, title: string): Conversation {
       const result = db
-        .prepare('INSERT INTO conversations (user_id, title) VALUES (?, ?)')
-        .run(userId, title);
+        .prepare('INSERT INTO conversations (user_id, assistant_id, title) VALUES (?, ?, ?)')
+        .run(userId, assistantId, title);
       const conversation = this.findConversation(Number(result.lastInsertRowid), userId);
       if (!conversation) throw new Error('Could not create conversation');
       return conversation;
@@ -242,10 +277,15 @@ export function createRepo(db: Db) {
       return row ? toConversation(row) : null;
     },
 
-    listConversations(userId: number): Conversation[] {
+    /** Scoped to one assistant: a user's threads do not cross assistants. */
+    listConversations(userId: number, assistantId: number): Conversation[] {
       const rows = db
-        .prepare('SELECT * FROM conversations WHERE user_id = ? ORDER BY updated_at DESC, id DESC')
-        .all(userId) as ConversationRow[];
+        .prepare(
+          `SELECT * FROM conversations
+           WHERE user_id = ? AND assistant_id = ?
+           ORDER BY updated_at DESC, id DESC`,
+        )
+        .all(userId, assistantId) as ConversationRow[];
       return rows.map(toConversation);
     },
 
@@ -299,44 +339,160 @@ export function createRepo(db: Db) {
 
     // ---- memories ---------------------------------------------------------
 
-    /** Most recent first, newest-limit entries. */
-    listMemories(userId: number, limit: number): Memory[] {
+    /** Most recent first, newest-limit entries, for this assistant only. */
+    listMemories(userId: number, assistantId: number, limit: number): Memory[] {
       const rows = db
-        .prepare('SELECT * FROM memories WHERE user_id = ? ORDER BY id DESC LIMIT ?')
-        .all(userId, limit) as MemoryRow[];
+        .prepare(
+          'SELECT * FROM memories WHERE user_id = ? AND assistant_id = ? ORDER BY id DESC LIMIT ?',
+        )
+        .all(userId, assistantId, limit) as MemoryRow[];
       return rows.map(toMemory);
     },
 
-    addMemory(userId: number, content: string): void {
-      db.prepare('INSERT INTO memories (user_id, content) VALUES (?, ?)').run(userId, content);
+    addMemory(userId: number, assistantId: number, content: string): void {
+      db.prepare('INSERT INTO memories (user_id, assistant_id, content) VALUES (?, ?, ?)').run(
+        userId,
+        assistantId,
+        content,
+      );
     },
 
-    countMemories(userId: number): number {
-      const row = db.prepare('SELECT COUNT(*) AS count FROM memories WHERE user_id = ?').get(userId) as {
-        count: number;
-      };
-      return row.count;
+    clearMemories(userId: number, assistantId: number): void {
+      db.prepare('DELETE FROM memories WHERE user_id = ? AND assistant_id = ?').run(userId, assistantId);
     },
 
-    clearMemories(userId: number): void {
-      db.prepare('DELETE FROM memories WHERE user_id = ?').run(userId);
+    // ---- assistants -------------------------------------------------------
+
+    listAssistants(): Assistant[] {
+      const rows = db.prepare('SELECT * FROM assistants ORDER BY name').all() as AssistantRow[];
+      return rows.map(toAssistant);
+    },
+
+    findAssistantBySlug(slug: string): Assistant | null {
+      const row = db.prepare('SELECT * FROM assistants WHERE slug = ?').get(slug) as
+        | AssistantRow
+        | undefined;
+      return row ? toAssistant(row) : null;
+    },
+
+    findAssistantById(id: number): Assistant | null {
+      const row = db.prepare('SELECT * FROM assistants WHERE id = ?').get(id) as
+        | AssistantRow
+        | undefined;
+      return row ? toAssistant(row) : null;
+    },
+
+    createAssistant(slug: string, name: string, description: string, language: string): Assistant {
+      const result = db
+        .prepare('INSERT INTO assistants (slug, name, description, language) VALUES (?, ?, ?, ?)')
+        .run(slug, name, description, language);
+      const assistant = this.findAssistantById(Number(result.lastInsertRowid));
+      if (!assistant) throw new Error(`Could not create assistant ${slug}`);
+      return assistant;
+    },
+
+    updateAssistant(id: number, name: string, description: string, language: string): void {
+      db.prepare('UPDATE assistants SET name = ?, description = ?, language = ? WHERE id = ?').run(
+        name,
+        description,
+        language,
+        id,
+      );
+    },
+
+    /** Cascades to its conversations, memories, settings and grants. */
+    deleteAssistant(id: number): void {
+      db.prepare('DELETE FROM assistants WHERE id = ?').run(id);
+    },
+
+    // ---- rights matrix ----------------------------------------------------
+
+    /** Assistants this user may chat with. Admins may use every one. */
+    listAssistantsForUser(userId: number, isAdmin: boolean): Assistant[] {
+      if (isAdmin) return this.listAssistants();
+      const rows = db
+        .prepare(
+          `SELECT a.* FROM assistants a
+           JOIN assistant_users au ON au.assistant_id = a.id
+           WHERE au.user_id = ?
+           ORDER BY a.name`,
+        )
+        .all(userId) as AssistantRow[];
+      return rows.map(toAssistant);
+    },
+
+    canUseAssistant(userId: number, isAdmin: boolean, assistantId: number): boolean {
+      if (isAdmin) return true;
+      const row = db
+        .prepare('SELECT 1 AS ok FROM assistant_users WHERE user_id = ? AND assistant_id = ?')
+        .get(userId, assistantId) as { ok: number } | undefined;
+      return row !== undefined;
+    },
+
+    /** User ids explicitly granted this assistant; admins are not listed. */
+    listGrantedUserIds(assistantId: number): number[] {
+      const rows = db
+        .prepare('SELECT user_id FROM assistant_users WHERE assistant_id = ?')
+        .all(assistantId) as { user_id: number }[];
+      return rows.map((row) => row.user_id);
+    },
+
+    grantAssistant(assistantId: number, userId: number): void {
+      db.prepare(
+        'INSERT OR IGNORE INTO assistant_users (assistant_id, user_id) VALUES (?, ?)',
+      ).run(assistantId, userId);
+    },
+
+    revokeAssistant(assistantId: number, userId: number): void {
+      db.prepare('DELETE FROM assistant_users WHERE assistant_id = ? AND user_id = ?').run(
+        assistantId,
+        userId,
+      );
+    },
+
+    /** Replaces the whole grant list for one assistant in a single transaction. */
+    setAssistantUsers(assistantId: number, userIds: readonly number[]): void {
+      db.transaction(() => {
+        db.prepare('DELETE FROM assistant_users WHERE assistant_id = ?').run(assistantId);
+        const insert = db.prepare(
+          'INSERT OR IGNORE INTO assistant_users (assistant_id, user_id) VALUES (?, ?)',
+        );
+        for (const userId of userIds) insert.run(assistantId, userId);
+      })();
     },
 
     // ---- settings ---------------------------------------------------------
 
-    /** Runtime setting, or null when an admin has never set it. */
-    getSetting(key: string): string | null {
-      const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as
-        | { value: string }
-        | undefined;
+    /** Runtime setting for one assistant, or null when never set. */
+    getSetting(assistantId: number, key: string): string | null {
+      const row = db
+        .prepare('SELECT value FROM assistant_settings WHERE assistant_id = ? AND key = ?')
+        .get(assistantId, key) as { value: string } | undefined;
       return row ? row.value : null;
     },
 
-    setSetting(key: string, value: string): void {
+    setSetting(assistantId: number, key: string, value: string): void {
       db.prepare(
-        `INSERT INTO settings (key, value) VALUES (?, ?)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
-      ).run(key, value);
+        `INSERT INTO assistant_settings (assistant_id, key, value) VALUES (?, ?, ?)
+         ON CONFLICT(assistant_id, key) DO UPDATE
+           SET value = excluded.value, updated_at = datetime('now')`,
+      ).run(assistantId, key, value);
+    },
+
+    /** Reads the pre-assistant global settings table, for the one-off backfill. */
+    legacySettings(): { key: string; value: string }[] {
+      return db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[];
+    },
+
+    /** Rows still carrying no assistant, from before multi-assistant support. */
+    attachOrphansToAssistant(assistantId: number): { conversations: number; memories: number } {
+      const conversations = db
+        .prepare('UPDATE conversations SET assistant_id = ? WHERE assistant_id IS NULL')
+        .run(assistantId).changes;
+      const memories = db
+        .prepare('UPDATE memories SET assistant_id = ? WHERE assistant_id IS NULL')
+        .run(assistantId).changes;
+      return { conversations, memories };
     },
   };
 }

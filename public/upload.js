@@ -22,7 +22,9 @@ if (form && input && status) {
         files.map(async (file) => ({ name: file.name, content: await file.text() })),
       );
 
-      const response = await fetch('/admin/content/upload', {
+      const page = document.querySelector('[data-upload]');
+      const uploadUrl = page?.dataset.upload ?? '/admin/content/upload';
+      const response = await fetch(uploadUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ files: payload }),
@@ -44,7 +46,8 @@ if (form && input && status) {
         return;
       }
 
-      window.location.href = `/admin/content?ok=${encodeURIComponent(`${result.saved.length} file(s) uploaded.`)}`;
+      const base = page?.dataset.base ?? '/admin/content';
+      window.location.href = `${base}?ok=${encodeURIComponent(`${result.saved.length} file(s) uploaded.`)}`;
     } catch (error) {
       status.textContent = error.message;
     } finally {
