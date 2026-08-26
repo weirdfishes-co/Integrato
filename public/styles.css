@@ -267,6 +267,19 @@ button.danger {
   text-align: right;
 }
 
+/* A cell may hold several actions (a link plus a delete form); keep them on
+   one line instead of letting the block-level form drop below. */
+.table td.actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.table td.actions form {
+  display: inline;
+}
+
 .table code {
   font-family: var(--font-mono);
   font-size: 0.85em;
