@@ -147,11 +147,18 @@ context/*.md         knowledge base seeded into a brand-new assistant
   `file.text()` and POSTs it as JSON — saves a multer dependency for what is
   always text.
 - **The picker's background is generated once, not per request.**
-  `buildBackgroundPaths()` in `views.ts` builds two mirrored fans of curves at
-  module load and `layout()` reuses the string; it adds about 6 kB to that one
+  `buildBackgroundPaths()` in `views.ts` builds the circuit-board artwork at
+  module load and the picker reuses the string; it adds about 2 kB to that one
   page. It is decoration: `aria-hidden`, `pointer-events: none`, and reduced to
-  static lines under `prefers-reduced-motion`. Animation is CSS only — a
-  travelling dash over `pathLength="1"` — so no animation library is needed.
+  a still, fully drawn board under `prefers-reduced-motion`. Animation is CSS
+  only — `pathLength="1"` normalises every trace so one keyframe set draws them
+  all — so no animation library is needed. Theme switching is done by
+  overriding `stroke`/`fill`/`filter` with the dark gradient and glow in a
+  `prefers-color-scheme` block, because `url(#id)` references cannot be themed
+  from the attribute alone.
+- **A background must not flicker.** The first attempt faded every line to zero
+  opacity on each cycle, which read as noise rather than motion. Keyframes here
+  keep a floor (0.25 and up) and end fully lit.
 - **Static assets carry a per-boot version** (`ASSET_VERSION` in `views.ts`,
   appended as `?v=` to the script and stylesheet URLs). `express.static` caches
   them for an hour in production, so the deploy that moved the API to

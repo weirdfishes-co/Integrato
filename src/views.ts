@@ -38,42 +38,73 @@ interface LayoutOptions {
 const ASSET_VERSION = Date.now().toString(36);
 
 /**
- * Decorative flowing contour lines behind the assistant picker.
+ * Decorative circuit-board artwork behind the assistant picker: traces drawn
+ * along right angles, with a node pulsing at each junction.
  *
- * Two mirrored fans of curves, each drawn with a travelling dash so the lines
- * appear to be drawn continuously. The markup is generated once at module load
- * rather than per request: it is the same on every page.
+ * Modelled on the ScrollX-UI "background paths" component, but the animation is
+ * CSS rather than an animation library: `pathLength="1"` normalises every trace
+ * so one keyframe set can draw them all regardless of their real length.
  *
- * Purely decorative, so it is aria-hidden and never takes pointer events, and
- * it stops moving entirely under prefers-reduced-motion (see styles.css).
+ * Built once at module load — it is identical on every render. Purely
+ * decorative, so it is aria-hidden, never takes pointer events, and stops
+ * moving under prefers-reduced-motion (see styles.css).
  */
 function buildBackgroundPaths(): string {
-  const PATHS_PER_FAN = 24;
-  const groups: string[] = [];
+  const traces = [
+    'M 50 100 L 200 100 L 200 200 L 350 200 L 350 300 L 500 300',
+    'M 500 50 L 500 150 L 650 150 L 650 250 L 800 250 L 800 350',
+    'M 100 400 L 250 400 L 250 500 L 400 500 L 400 600 L 550 600',
+    'M 600 400 L 750 400 L 750 500 L 900 500 L 900 600',
+    'M 50 300 L 150 300 L 150 450 L 300 450 L 300 550',
+    'M 700 100 L 850 100 L 850 200 L 950 200',
+    'M 150 200 L 300 200 L 300 350 L 450 350 L 450 450',
+    'M 550 150 L 700 150 L 700 300 L 850 300',
+  ];
 
-  for (const direction of [1, -1]) {
-    const paths: string[] = [];
-    for (let i = 0; i < PATHS_PER_FAN; i += 1) {
-      const shift = i * 5 * direction;
-      const drop = i * 6;
-      const d =
-        `M${-380 - shift} ${-189 + drop}` +
-        `C${-380 - shift} ${-189 + drop} ${-312 - shift} ${216 - drop} ${152 - shift} ${343 - drop}` +
-        `C${616 - shift} ${470 - drop} ${684 - shift} ${875 - drop} ${684 - shift} ${875 - drop}`;
-      // Slower and fainter as the fan spreads out, so the eye follows the front.
-      const duration = (18 + i * 0.6).toFixed(1);
-      const delay = (i * -0.45).toFixed(2);
-      const width = (0.5 + i * 0.035).toFixed(2);
-      paths.push(
-        `<path d="${d}" stroke-width="${width}" pathLength="1" ` +
-          `style="animation-duration:${duration}s;animation-delay:${delay}s"/>`,
+  const nodes = [
+    [200, 100], [350, 200], [500, 300], [500, 150], [650, 150], [800, 350],
+    [250, 400], [400, 500], [750, 400], [150, 300], [300, 450], [850, 100],
+  ];
+
+  const gradient = (id: string, stops: readonly string[]): string =>
+    `<linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1">` +
+    stops
+      .map((color, index) => `<stop offset="${index * 50}%" stop-color="${color}"/>`)
+      .join('') +
+    '</linearGradient>';
+
+  const glow = (id: string, deviation: number): string =>
+    `<filter id="${id}" x="-50%" y="-50%" width="200%" height="200%">` +
+    `<feGaussianBlur stdDeviation="${deviation}" result="blur"/>` +
+    '<feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>';
+
+  const defs =
+    '<defs>' +
+    gradient('circuit-light', ['#10b981', '#3b82f6', '#8b5cf6']) +
+    gradient('circuit-dark', ['#00ff41', '#00d9ff', '#7c3aed']) +
+    glow('circuit-glow-light', 1.5) +
+    glow('circuit-glow-dark', 2) +
+    '</defs>';
+
+  // Staggered so the board lights up trace by trace rather than all at once.
+  const paths = traces
+    .map((d, index) => `<path class="circuit__trace" d="${d}" pathLength="1" style="animation-delay:${(index * 0.5).toFixed(2)}s"/>`)
+    .join('');
+
+  const points = nodes
+    .map(([x, y], index) => {
+      const delay = (index * 0.3).toFixed(2);
+      return (
+        `<g class="circuit__node">` +
+        `<circle class="circuit__ring" cx="${x}" cy="${y}" r="12" style="animation-delay:${delay}s"/>` +
+        `<circle class="circuit__core" cx="${x}" cy="${y}" r="6" style="animation-delay:${delay}s"/>` +
+        '</g>'
       );
-    }
-    groups.push(`<g class="paths__fan">${paths.join('')}</g>`);
-  }
+    })
+    .join('');
 
-  return `<svg class="paths" viewBox="-400 -200 1100 1100" preserveAspectRatio="xMidYMid slice"
-       aria-hidden="true" focusable="false">${groups.join('')}</svg>`;
+  return `<svg class="circuit" viewBox="0 0 1000 700" fill="none"
+       preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">${defs}${paths}${points}</svg>`;
 }
 
 const BACKGROUND_PATHS = buildBackgroundPaths();
