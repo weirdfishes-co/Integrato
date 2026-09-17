@@ -629,6 +629,29 @@ input[type='file'] {
   border-radius: var(--radius-md);
 }
 
+/*
+ * On a light surface the mark needs no plate — it is already dark type on
+ * white. Only the dark sidebar does.
+ */
+.brand--card,
+.brand--page {
+  background: none;
+  padding: 0;
+  margin-bottom: var(--space-4);
+  max-width: 220px;
+}
+
+.page__brand {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.page__brand h1 {
+  margin: 0;
+}
+
 /* heading4, inverted on the dark band. */
 .brand__assistant {
   font-family: var(--font-heading);
@@ -1157,136 +1180,89 @@ input[type='file'] {
   }
 }
 
-/* ---------- circuit background (assistant picker) ---------- */
+/* ---------- assistant picker ---------- */
 
-.has-paths {
-  position: relative;
-  overflow-x: hidden;
-  background: var(--bg-subtle);
+/* heading2 promoted to heading1 from xl up, per §2 — not an ad-hoc size. */
+.page--picker h1 {
+  font-size: 1.875rem;
+  line-height: 1.25;
 }
 
-.circuit {
-  position: fixed;
-  inset: 0;
-  width: 100%;
+@media (min-width: 1280px) {
+  .page--picker h1 {
+    font-size: 3rem;
+    line-height: 1.25;
+  }
+}
+
+.picker {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
+  gap: var(--space-5);
+}
+
+/*
+ * The card pattern from §5: white surface, rounded-lg, shadow-md, and the
+ * whole card is one target — hovering it fills the CTA, as `group-hover` does
+ * on the site.
+ */
+.picker__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
   height: 100%;
-  z-index: 0;
-  /* Decoration only: never swallow a click meant for a card. */
-  pointer-events: none;
-  /* Faint enough to sit behind text; the glow makes it read stronger than the
-     number suggests, and stronger again against a dark ground. */
-  opacity: 0.6;
+  padding: var(--space-5);
+  border-top: 4px solid var(--secondary);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow);
+  background: var(--bg-raised);
+  color: inherit;
+  text-decoration: none;
+  overflow: hidden;
+  transition: all var(--transition);
 }
 
-@media (prefers-color-scheme: dark) {
-  .circuit { opacity: 0.5; }
+.picker__card:hover,
+.picker__card:focus-visible {
+  background: var(--primary-600);
+  border-top-color: var(--secondary-600);
 }
 
-.circuit__trace {
-  fill: none;
-  stroke: url(#circuit-light);
-  stroke-width: 3;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  filter: url(#circuit-glow-light);
-  /* pathLength="1" normalises every trace, so one dash covers all of them. */
-  stroke-dasharray: 1;
-  stroke-dashoffset: 1;
-  animation: circuit-trace 6s ease-in-out infinite;
+.picker__card:hover .picker__name,
+.picker__card:focus-visible .picker__name,
+.picker__card:hover .picker__description,
+.picker__card:focus-visible .picker__description {
+  color: #ffffff;
 }
 
-.circuit__core {
-  fill: url(#circuit-light);
-  filter: url(#circuit-glow-light);
-  animation: circuit-core 2s ease-in-out infinite;
+/* heading4 */
+.picker__name {
+  font-family: var(--font-heading);
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--heading);
+  transition: color var(--transition);
 }
 
-.circuit__ring {
-  fill: none;
-  stroke: url(#circuit-light);
-  stroke-width: 1;
-  opacity: 0.5;
-  animation: circuit-ring 3s ease-in-out infinite;
+.picker__description {
+  font-size: 1rem;
+  color: var(--text-muted);
+  line-height: 1.5rem;
+  /* line-clamp-3, as the site's cards do. */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  transition: color var(--transition);
 }
 
-/* Scale each node about its own centre rather than the SVG origin. */
-.circuit__core,
-.circuit__ring {
-  transform-box: fill-box;
-  transform-origin: center;
-  transform: scale(0);
-}
-
-@media (prefers-color-scheme: dark) {
-  .circuit__trace {
-    stroke: url(#circuit-dark);
-    filter: url(#circuit-glow-dark);
-  }
-
-  .circuit__core {
-    fill: url(#circuit-dark);
-    filter: url(#circuit-glow-dark);
-  }
-
-  .circuit__ring {
-    stroke: url(#circuit-dark);
-  }
-}
-
-/* Draws in, dims once, then settles fully lit — a circuit powering up. The
-   trace never returns to zero opacity, which is what made the earlier version
-   flicker. */
-@keyframes circuit-trace {
-  0% {
-    stroke-dashoffset: 1;
-    opacity: 0.25;
-  }
-  35% {
-    stroke-dashoffset: 0;
-    opacity: 1;
-  }
-  65% {
-    stroke-dashoffset: 0.2;
-    opacity: 0.55;
-  }
-  100% {
-    stroke-dashoffset: 0;
-    opacity: 1;
-  }
-}
-
-@keyframes circuit-core {
-  0% { transform: scale(0.9); }
-  25% { transform: scale(1.3); }
-  50% { transform: scale(1); }
-  75% { transform: scale(1.1); }
-  100% { transform: scale(0.9); }
-}
-
-@keyframes circuit-ring {
-  0% { transform: scale(0.8); opacity: 0.5; }
-  33% { transform: scale(1.5); opacity: 0.15; }
-  66% { transform: scale(1.2); opacity: 0.4; }
-  100% { transform: scale(0.8); opacity: 0.5; }
-}
-
-/* The picker sits above the artwork. */
-.page--picker {
-  position: relative;
-  z-index: 1;
-}
-
-/* Movement is the whole point, so honour a request to stop it: the board stays,
-   fully drawn and still. */
 @media (prefers-reduced-motion: reduce) {
-  .circuit__trace,
-  .circuit__core,
-  .circuit__ring {
-    animation: none;
-    stroke-dashoffset: 0;
-    opacity: 1;
-    transform: scale(1);
+  .picker__card,
+  .picker__name,
+  .picker__description {
+    transition: none;
   }
-
-  .circuit__ring { opacity: 0.5; }
 }

@@ -1,15 +1,17 @@
-# AI Assistant
+# Nyenrode coachbot
 
 A host for several configurable chat assistants, on any model OpenRouter offers.
 Each assistant has its own instructions, knowledge base, model settings and list
-of users. People sign in with a magic link, pick an assistant they have access
-to, and their conversations are kept per assistant in PostgreSQL.
+of users. People sign in with a magic link — administrators with a password —
+pick an assistant they have access to, and their conversations are kept per
+assistant in PostgreSQL.
 
 - **Stack**: Node 22, TypeScript, Express 5, PostgreSQL
 - **Model access**: OpenRouter (OpenAI-compatible API), one key for every model
 - **Email**: Brevo HTTP API
 - **Hosting**: Railway (Dockerfile + a Postgres service + a volume for the knowledge bases)
-- **Auth**: magic link over email, 30-day cookie session
+- **Auth**: magic link over email for users, `ADMIN_PASSWORD` for admins,
+  30-day cookie session
 - **Admin**: `/admin` for users, assistants and the OpenRouter balance;
   `/admin/assistants/:id` for one assistant's settings, access and knowledge base
 
@@ -26,13 +28,16 @@ docker run -d --name assistant-db -e POSTGRES_PASSWORD=dev \
   -e POSTGRES_DB=assistant -p 5432:5432 postgres:17-alpine
 
 npm install
-cp .env.example .env      # fill in DATABASE_URL, OPENROUTER_API_KEY, ADMIN_EMAILS, mail
+cp .env.example .env      # fill in DATABASE_URL, OPENROUTER_API_KEY,
+                          # ADMIN_EMAILS, ADMIN_PASSWORD, mail
 npm run dev               # http://localhost:3000
 ```
 
 The schema is created automatically: migrations run in-process at startup
 against `DATABASE_URL`. The addresses in `ADMIN_EMAILS` are written into the
-user list as admins on every boot, so you can always get in.
+user list as admins on every boot, so you can always get in: sign in on `/login`
+with one of those addresses plus `ADMIN_PASSWORD`. No email is sent for an
+admin, so the app is usable before any mail account exists.
 
 `npm test` needs Docker too — it starts a throwaway PostgreSQL container and
 runs the real migrations against it, so a mistake in the SQL fails in the suite
@@ -261,8 +266,9 @@ which the `Retry-After` header times.
    | `DATABASE_URL` | yes | PostgreSQL connection string; Railway's Postgres service supplies it |
    | `OPENROUTER_API_KEY` | yes | API key from [openrouter.ai/keys](https://openrouter.ai/keys) |
    | `ADMIN_EMAILS` | yes | Comma-separated admins; always granted rights at boot |
+   | `ADMIN_PASSWORD` | yes | Shared password for those addresses. Admins sign in with it instead of a magic link; at least 12 characters in production |
    | `BREVO_API_KEY` | yes | Brevo HTTP API key; the only way the app sends mail |
-   | `MAIL_FROM` | no | Sender, e.g. `AI Assistant <noreply@yourdomain.com>`. Must be a sender Brevo has verified |
+   | `MAIL_FROM` | no | Sender, e.g. `Nyenrode coachbot <noreply@yourdomain.com>`. Must be a sender Brevo has verified |
    | `ASSISTANT_NAME` | no | Name of the *first* assistant on a fresh install, and the sign-in email's sender name |
    | `ASSISTANT_LANGUAGE` | no | Answer language of the first assistant; each assistant carries its own afterwards |
    | `APP_URL` | yes | Public URL, e.g. `https://assistant.up.railway.app`. Magic links are built on this; `https://` sets the Secure flag on the cookie |
@@ -270,7 +276,7 @@ which the `Retry-After` header times.
    | `OPENROUTER_MODEL` | no | Starting model, default `anthropic/claude-opus-5`. An admin's choice on `/admin` overrides it |
    | `MODEL_EFFORT` / `MODEL_MAX_TOKENS` | no | Default `high` and `8000`. Effort is `low`–`max`; only reasoning models act on it |
    | `OPENROUTER_SITE_URL` / `OPENROUTER_SITE_NAME` | no | Optional attribution on the openrouter.ai rankings |
-   | `SESSION_DAYS` / `LOGIN_TOKEN_MINUTES` | no | Default 30 days and 30 minutes |
+   | `SESSION_DAYS` / `LOGIN_TOKEN_MINUTES` | no | Default 30 days and 30 minutes. `LOGIN_TOKEN_MINUTES` only affects the magic links non-admins receive |
    | `LOG_LEVEL` | no | pino level, default `info` |
 
    Railway sets `PORT` itself; the server binds on `0.0.0.0`. Do not set
@@ -291,6 +297,7 @@ docker build -t ai-assistant .
 docker run --rm -p 3000:3000 \
   -e OPENROUTER_API_KEY=sk-or-v1-... \
   -e ADMIN_EMAILS=you@example.com \
+  -e ADMIN_PASSWORD=a-long-password \
   -e BREVO_API_KEY=xkeysib-... \
   -e APP_URL=http://localhost:3000 \
   -v "$PWD/data:/data" \
@@ -301,8 +308,16 @@ docker run --rm -p 3000:3000 \
 
 - Sign-in tokens and session tokens are stored as a SHA-256 hash only.
 - A sign-in link works once and expires after `LOGIN_TOKEN_MINUTES`.
+- `ADMIN_PASSWORD` is compared in constant time and is never written to the log.
+  It is shared by every address in `ADMIN_EMAILS`, so the audit trail says
+  *which admin* signed in but not that they alone knew the password — rotate it
+  whenever someone stops being an admin.
 - The login form never reveals whether an address exists, and is limited to
-  5 attempts per fifteen minutes per address and per IP.
+  5 attempts per fifteen minutes per address and per IP. Submitting a password
+  returns one message for every failure, so it cannot be used to test addresses;
+  submitting an *empty* password does reveal whether an address is an admin,
+  which is the price of telling admins to use their password instead of waiting
+  for an email that never comes.
 - Session cookies are `httpOnly` + `sameSite=lax`, and `secure` as soon as
   `APP_URL` is on `https://`.
 - A session lasts `SESSION_DAYS` (30) from signing in and is **not** extended by

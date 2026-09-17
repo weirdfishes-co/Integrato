@@ -25,7 +25,7 @@ interface CacheEntry {
   prompt: string;
 }
 
-const DEFAULT_NAME = 'AI Assistant';
+const DEFAULT_NAME = 'Nyenrode coachbot';
 const DEFAULT_LANGUAGE = 'English';
 
 /**

@@ -37,78 +37,6 @@ interface LayoutOptions {
  */
 const ASSET_VERSION = Date.now().toString(36);
 
-/**
- * Decorative circuit-board artwork behind the assistant picker: traces drawn
- * along right angles, with a node pulsing at each junction.
- *
- * Modelled on the ScrollX-UI "background paths" component, but the animation is
- * CSS rather than an animation library: `pathLength="1"` normalises every trace
- * so one keyframe set can draw them all regardless of their real length.
- *
- * Built once at module load — it is identical on every render. Purely
- * decorative, so it is aria-hidden, never takes pointer events, and stops
- * moving under prefers-reduced-motion (see styles.css).
- */
-function buildBackgroundPaths(): string {
-  const traces = [
-    'M 50 100 L 200 100 L 200 200 L 350 200 L 350 300 L 500 300',
-    'M 500 50 L 500 150 L 650 150 L 650 250 L 800 250 L 800 350',
-    'M 100 400 L 250 400 L 250 500 L 400 500 L 400 600 L 550 600',
-    'M 600 400 L 750 400 L 750 500 L 900 500 L 900 600',
-    'M 50 300 L 150 300 L 150 450 L 300 450 L 300 550',
-    'M 700 100 L 850 100 L 850 200 L 950 200',
-    'M 150 200 L 300 200 L 300 350 L 450 350 L 450 450',
-    'M 550 150 L 700 150 L 700 300 L 850 300',
-  ];
-
-  const nodes = [
-    [200, 100], [350, 200], [500, 300], [500, 150], [650, 150], [800, 350],
-    [250, 400], [400, 500], [750, 400], [150, 300], [300, 450], [850, 100],
-  ];
-
-  const gradient = (id: string, stops: readonly string[]): string =>
-    `<linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1">` +
-    stops
-      .map((color, index) => `<stop offset="${index * 50}%" stop-color="${color}"/>`)
-      .join('') +
-    '</linearGradient>';
-
-  const glow = (id: string, deviation: number): string =>
-    `<filter id="${id}" x="-50%" y="-50%" width="200%" height="200%">` +
-    `<feGaussianBlur stdDeviation="${deviation}" result="blur"/>` +
-    '<feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>';
-
-  const defs =
-    '<defs>' +
-    gradient('circuit-light', ['#10b981', '#3b82f6', '#8b5cf6']) +
-    gradient('circuit-dark', ['#00ff41', '#00d9ff', '#7c3aed']) +
-    glow('circuit-glow-light', 1.5) +
-    glow('circuit-glow-dark', 2) +
-    '</defs>';
-
-  // Staggered so the board lights up trace by trace rather than all at once.
-  const paths = traces
-    .map((d, index) => `<path class="circuit__trace" d="${d}" pathLength="1" style="animation-delay:${(index * 0.5).toFixed(2)}s"/>`)
-    .join('');
-
-  const points = nodes
-    .map(([x, y], index) => {
-      const delay = (index * 0.3).toFixed(2);
-      return (
-        `<g class="circuit__node">` +
-        `<circle class="circuit__ring" cx="${x}" cy="${y}" r="12" style="animation-delay:${delay}s"/>` +
-        `<circle class="circuit__core" cx="${x}" cy="${y}" r="6" style="animation-delay:${delay}s"/>` +
-        '</g>'
-      );
-    })
-    .join('');
-
-  return `<svg class="circuit" viewBox="0 0 1000 700" fill="none"
-       preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">${defs}${paths}${points}</svg>`;
-}
-
-const BACKGROUND_PATHS = buildBackgroundPaths();
-
 function layout({ title, body, bodyClass, scripts = [] }: LayoutOptions): string {
   const scriptTags = scripts
     .map((src) => `<script type="module" src="${src}?v=${ASSET_VERSION}" defer></script>`)
@@ -120,6 +48,10 @@ function layout({ title, body, bodyClass, scripts = [] }: LayoutOptions): string
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="color-scheme" content="light dark">
     <title>${escapeHtml(title)}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@600&family=Open+Sans:ital,wght@0,300..800;1,300..800&display=swap">
     <link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}">
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%92%AC%3C/text%3E%3C/svg%3E">
     ${scriptTags}
@@ -245,8 +177,15 @@ export interface ViewOptions {
   readonly assistantLanguage: string;
 }
 
+/** Extra state the login form carries back after a failed attempt. */
+export interface LoginPageOptions extends NoticeOptions {
+  email?: string;
+  /** Puts the cursor in the password field, after an admin left it empty. */
+  focusPassword?: boolean;
+}
+
 export interface Views {
-  loginPage(options?: NoticeOptions & { email?: string }): string;
+  loginPage(options?: LoginPageOptions): string;
   linkSentPage(email: string): string;
   /** Assistant list for a signed-in user; only what they may use. */
   pickerPage(user: User, assistants: readonly Assistant[]): string;
@@ -276,18 +215,35 @@ export function createViews({ assistantName, assistantLanguage }: ViewOptions): 
 
   return {
     loginPage(options = {}) {
+      // Only an administrator is ever asked for a password, and only after the
+      // route has recognised the address they typed. Everyone else sees one
+      // field and never learns a password exists.
+      const passwordField = options.focusPassword
+        ? `        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" autofocus>
+        </div>`
+        : '';
+
       return layout({
         title: `Sign in — ${assistantName}`,
         bodyClass: 'centered',
         body: `    <main class="card">
+      <img class="brand brand--card" src="/header_ny.jpg?v=${ASSET_VERSION}" width="523" height="119"
+           alt="Nyenrode Business Universiteit">
       <h1>${name}</h1>
       <p class="muted">Enter your email address. If it is on the user list, we will send you a sign-in link.</p>
       ${notice(options)}
       <form method="post" action="/login" class="stack">
-        <label for="email">Email address</label>
-        <input id="email" name="email" type="email" autocomplete="email" required
-               inputmode="email" placeholder="you@example.com" value="${escapeHtml(options.email ?? '')}">
-        <button type="submit">Send sign-in link</button>
+        <div class="field">
+          <label for="email">Email address</label>
+          <input id="email" name="email" type="email" autocomplete="email" required
+                 inputmode="email" placeholder="you@example.com" value="${escapeHtml(options.email ?? '')}"${
+                   options.focusPassword ? '' : ' autofocus'
+                 }>
+        </div>
+${passwordField}
+        <button type="submit">Sign in</button>
       </form>
     </main>`,
       });
@@ -298,6 +254,8 @@ export function createViews({ assistantName, assistantLanguage }: ViewOptions): 
         title: `Check your inbox — ${assistantName}`,
         bodyClass: 'centered',
         body: `    <main class="card">
+      <img class="brand brand--card" src="/header_ny.jpg?v=${ASSET_VERSION}" width="523" height="119"
+           alt="Nyenrode Business Universiteit">
       <h1>Check your inbox</h1>
       <p class="muted">
         If <strong>${escapeHtml(email)}</strong> is on the user list, a sign-in link is on its way.
@@ -317,7 +275,11 @@ export function createViews({ assistantName, assistantLanguage }: ViewOptions): 
          data-slug="${escapeHtml(assistant.slug)}">
       <aside class="sidebar" id="sidebar">
         <div class="sidebar__head">
-          <span class="brand">${label}</span>
+          <div class="sidebar__brand">
+            <img class="brand" src="/header_ny.jpg?v=${ASSET_VERSION}" width="523" height="119"
+                 alt="Nyenrode Business Universiteit">
+            <span class="brand__assistant">${label}</span>
+          </div>
           <button type="button" class="icon-button" id="new-conversation" title="New conversation" aria-label="New conversation">+</button>
         </div>
         <nav class="conversations" id="conversations" aria-label="Conversations"></nav>
@@ -372,11 +334,13 @@ ${assistants
 
       return layout({
         title: `Assistants — ${assistantName}`,
-        bodyClass: 'has-paths',
-        body: `    ${BACKGROUND_PATHS}
-    <main class="page page--picker">
+        body: `    <main class="page page--picker">
       <header class="page__head">
-        <h1>Choose an assistant</h1>
+        <div class="page__brand">
+          <img class="brand brand--page" src="/header_ny.jpg?v=${ASSET_VERSION}" width="523" height="119"
+               alt="Nyenrode Business Universiteit">
+          <h1>Choose an assistant</h1>
+        </div>
         <div class="row">
           ${user.isAdmin ? '<a class="link" href="/admin">Admin</a>' : ''}
           <form method="post" action="/logout"><button type="submit" class="link">Sign out</button></form>
@@ -452,7 +416,7 @@ ${assistantRows}
         <form method="post" action="/admin/assistants" class="row row--form">
           <label class="visually-hidden" for="new-assistant">Name</label>
           <input id="new-assistant" name="name" type="text" required placeholder="New assistant name">
-          <button type="submit">Create</button>
+          <button type="submit" class="secondary">Create</button>
         </form>
       </section>
 
@@ -463,7 +427,7 @@ ${assistantRows}
           <label class="visually-hidden" for="new-email">Email address</label>
           <input id="new-email" name="email" type="email" required placeholder="new@example.com">
           <label class="checkbox"><input type="checkbox" name="is_admin" value="1"> Admin</label>
-          <button type="submit">Add</button>
+          <button type="submit" class="secondary">Add</button>
         </form>
 
         <table class="table">
@@ -730,7 +694,7 @@ ${rows}
           <label class="visually-hidden" for="new-name">File name</label>
           <input id="new-name" name="name" type="text" required placeholder="Guidelines.md"
                  pattern="[A-Za-z0-9_-]{1,64}\\.md">
-          <button type="submit">New document</button>
+          <button type="submit" class="secondary">New document</button>
         </form>
 
         <form method="post" action="${base}/upload" id="upload-form" class="stack">

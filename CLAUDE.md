@@ -6,10 +6,11 @@ instructions (installing, deploying, env variables) live in [README.md](README.m
 
 ## What this is
 
-A host for **several chat assistants**. Each assistant has its own system
+**Nyenrode coachbot** — a host for **several chat assistants**. Each assistant has its own system
 prompt, its own markdown knowledge base, its own model and settings, and its own
 list of users. The model runs through OpenRouter. Only email addresses on the
-user list can sign in, via a magic link; after signing in a user picks from the
+user list can sign in — ordinary users via a magic link, admins with their email
+plus `ADMIN_PASSWORD`; after signing in a user picks from the
 assistants they were granted. Conversations and remembered facts are stored per
 user *and* per assistant, so nothing crosses between them.
 
@@ -106,9 +107,24 @@ context/*.md         knowledge base seeded into a brand-new assistant
   `dist/migrations/`, because `db/index.ts` looks for them next to the bundle.
 - **Migrations in-process at boot.** One cold start fewer than a separate
   migration command, so `/healthz` comes up sooner.
-- **Magic link, no passwords.** Nothing to leak, nothing to reset. Tokens are
-  stored as a SHA-256 hash only; the plaintext lives solely in the email
-  (sign-in) or the cookie (session).
+- **Magic link for users, a password for admins.** For ordinary users there is
+  nothing to leak and nothing to reset: tokens are stored as a SHA-256 hash
+  only, and the plaintext lives solely in the email (sign-in) or the cookie
+  (session). Admins are the exception — they sign in with their address plus the
+  shared `ADMIN_PASSWORD` from the environment and are never mailed a link, so
+  the admin pages stay reachable when mail is down, unconfigured, or slow, which
+  is exactly the state a fresh install is in. The password is compared as a
+  SHA-256 digest through `timingSafeEqual` (`verifyAdminPassword` in `auth.ts`):
+  comparing the raw strings would throw on a length mismatch and leak the
+  length. `ADMIN_PASSWORD` is **required** — an empty one locks the owner out of
+  `/admin` entirely — and must be 12 characters or more in production.
+- **One message for every failed password, but an empty password is honest.**
+  `POST /login` answers wrong-password, non-admin and unknown-address alike, so
+  a password cannot be used to probe the user list. Leaving the password empty
+  as an admin *does* answer "Administrators sign in with the password", which
+  reveals that one address is an admin. That is deliberate: the alternative is
+  an admin waiting forever for an email that is never sent. The rate limiter
+  (5 per 15 minutes per address *and* per IP) covers the brute force.
 - **Server-rendered HTML + vanilla JS.** Four screens; a frontend framework
   would cost more build time and dependencies than it returns.
 - **SSE over a POST request** for streaming answers. `EventSource` can only do
@@ -209,6 +225,11 @@ context/*.md         knowledge base seeded into a brand-new assistant
   example: paid models failed on Railway while a `:free` model worked, which is
   the signature of a key with no credit; the generic message hid that for two
   rounds of guessing.
+- **`ADMIN_PASSWORD` is shared by every address in `ADMIN_EMAILS`.** The session
+  still records *which* admin signed in, so the admin table stays meaningful,
+  but the secret does not distinguish them: rotate it when someone stops being
+  an admin. Per-admin passwords would need a column, hashing and a reset flow —
+  a deliberate non-goal for an app this size.
 - **Sessions are a fixed 30-day window, not a sliding one.** `expires_at` is
   written once in `createSession` and never extended, so an active user is still
   signed out on day 30. It is enforced twice: the cookie's own `expires`, and

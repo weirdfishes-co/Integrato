@@ -48,6 +48,9 @@ export function normalizeEmail(input: string): string {
   return input.trim().toLowerCase();
 }
 
+/** Only enforced in production; see loadConfig. */
+export const MIN_ADMIN_PASSWORD = 12;
+
 export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type Effort = (typeof EFFORT_LEVELS)[number];
 
@@ -86,6 +89,11 @@ export interface Config {
   readonly adminEmails: readonly string[];
   readonly sessionDays: number;
   readonly loginTokenMinutes: number;
+  /**
+   * Shared password for the addresses in adminEmails. Admins sign in with it
+   * instead of a magic link; everyone else still gets a link by email.
+   */
+  readonly adminPassword: string;
   readonly mail: {
     /**
      * Brevo's HTTP API key, and the only way the app sends mail. Empty outside
@@ -100,7 +108,7 @@ export function loadConfig(env: Env = process.env): Config {
   const nodeEnv = optional(env, 'NODE_ENV', 'development');
   const isProduction = nodeEnv === 'production';
   const appUrl = optional(env, 'APP_URL', 'http://localhost:3000').replace(/\/+$/, '');
-  const assistantName = optional(env, 'ASSISTANT_NAME', 'AI Assistant');
+  const assistantName = optional(env, 'ASSISTANT_NAME', 'Nyenrode coachbot');
 
   const adminEmails = parseEmailList(env.ADMIN_EMAILS ?? env.ADMIN_EMAIL);
   if (adminEmails.length === 0) {
@@ -112,6 +120,17 @@ export function loadConfig(env: Env = process.env): Config {
   const brevoApiKey = env.BREVO_API_KEY?.trim() || undefined;
   if (isProduction && !brevoApiKey) {
     throw new Error('Set BREVO_API_KEY so sign-in links can be emailed');
+  }
+
+  // Admins have no other way in, so an empty value locks the app's own owner
+  // out of /admin — hence required rather than optional. The length floor only
+  // binds in production: a short password is a fair trade for a local database
+  // full of test data, but not for a public deployment.
+  const adminPassword = required(env, 'ADMIN_PASSWORD');
+  if (isProduction && adminPassword.length < MIN_ADMIN_PASSWORD) {
+    throw new Error(
+      `ADMIN_PASSWORD must be at least ${MIN_ADMIN_PASSWORD} characters — it is the only lock on /admin`,
+    );
   }
 
   return {
@@ -133,6 +152,7 @@ export function loadConfig(env: Env = process.env): Config {
     adminEmails,
     sessionDays: integer(env, 'SESSION_DAYS', 30),
     loginTokenMinutes: integer(env, 'LOGIN_TOKEN_MINUTES', 30),
+    adminPassword,
     mail: {
       brevoApiKey,
       from: optional(env, 'MAIL_FROM', `${assistantName} <noreply@localhost>`),

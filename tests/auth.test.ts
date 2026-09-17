@@ -1,10 +1,18 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { once } from 'node:events';
+import type { AddressInfo } from 'node:net';
+
+import cookieParser from 'cookie-parser';
+import express from 'express';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { closeAll, freshRepo } from './helpers/db.js';
 
-import { hashToken } from '../src/auth.js';
+import { createAuth, hashToken } from '../src/auth.js';
 import { loadConfig } from '../src/config.js';
 import type { Repo } from '../src/db/repo.js';
+import type { Mailer } from '../src/mail.js';
+import { createAuthRouter } from '../src/routes/auth.js';
+import { createViews } from '../src/views.js';
 
 describe('login tokens', () => {
   let repo: Repo;
@@ -109,6 +117,7 @@ describe('loadConfig', () => {
     DATABASE_URL: 'postgres://localhost/test',
     OPENROUTER_API_KEY: 'sk-or-test',
     ADMIN_EMAILS: 'Boss@Example.COM, second@example.com',
+    ADMIN_PASSWORD: 'a-long-enough-secret',
     BREVO_API_KEY: 'xkeysib-test',
   };
 
@@ -127,6 +136,21 @@ describe('loadConfig', () => {
   it('fails without an admin', async () => {
     const { ADMIN_EMAILS: _omitted, ...rest } = base;
     expect(() => loadConfig(rest as NodeJS.ProcessEnv)).toThrow(/ADMIN_EMAILS/);
+  });
+
+  it('fails without an admin password, which would lock everyone out of /admin', async () => {
+    const { ADMIN_PASSWORD: _omitted, ...rest } = base;
+    expect(() => loadConfig(rest as NodeJS.ProcessEnv)).toThrow(/ADMIN_PASSWORD/);
+  });
+
+  it('allows a short admin password outside production', async () => {
+    expect(loadConfig({ ...base, ADMIN_PASSWORD: 'short' } as NodeJS.ProcessEnv).adminPassword).toBe('short');
+  });
+
+  it('requires a long admin password in production', async () => {
+    expect(() =>
+      loadConfig({ ...base, ADMIN_PASSWORD: 'short', NODE_ENV: 'production' } as NodeJS.ProcessEnv),
+    ).toThrow(/ADMIN_PASSWORD/);
   });
 
   it('allows a missing BREVO_API_KEY outside production, so the link goes to the log', async () => {
@@ -154,9 +178,9 @@ describe('loadConfig', () => {
   it('defaults the assistant name and language, and uses the name in MAIL_FROM', async () => {
     const config = loadConfig({ ...base } as NodeJS.ProcessEnv);
 
-    expect(config.assistantName).toBe('AI Assistant');
+    expect(config.assistantName).toBe('Nyenrode coachbot');
     expect(config.assistantLanguage).toBe('English');
-    expect(config.mail.from).toBe('AI Assistant <noreply@localhost>');
+    expect(config.mail.from).toBe('Nyenrode coachbot <noreply@localhost>');
   });
 
   it('accepts a custom assistant name and language', async () => {
@@ -168,6 +192,160 @@ describe('loadConfig', () => {
 
     expect(config.assistantName).toBe('Helpdesk Bot');
     expect(config.assistantLanguage).toBe('German');
+  });
+});
+
+describe('admin password sign-in', () => {
+  const env = {
+    DATABASE_URL: 'postgres://localhost/test',
+    OPENROUTER_API_KEY: 'sk-or-test',
+    ADMIN_EMAILS: 'boss@example.com',
+    ADMIN_PASSWORD: 'correct horse battery',
+    BREVO_API_KEY: 'xkeysib-test',
+  } as NodeJS.ProcessEnv;
+
+  let repo: Repo;
+  let sent: string[];
+  let base: string;
+  let close: () => Promise<void>;
+
+  /** The auth router on a real port, so the branches are exercised end to end. */
+  beforeEach(async () => {
+    repo = await freshRepo();
+    sent = [];
+
+    const config = loadConfig(env);
+    const auth = createAuth(config, repo);
+    const views = createViews({ assistantName: 'Test', assistantLanguage: 'English' });
+    const mailer: Mailer = {
+      async sendMagicLink(to) {
+        sent.push(to);
+      },
+    };
+
+    const app = express();
+    app.use(express.urlencoded({ extended: false }));
+    app.use(cookieParser());
+    app.use(createAuthRouter({ config, repo, auth, mailer, views }));
+
+    const server = app.listen(0);
+    await once(server, 'listening');
+    const address = server.address() as AddressInfo;
+    base = `http://127.0.0.1:${address.port}`;
+    close = () => new Promise((resolve) => server.close(() => resolve()));
+  });
+
+  afterEach(async () => {
+    await close();
+  });
+
+  function login(email: string, password?: string): Promise<Response> {
+    const body = new URLSearchParams({ email });
+    if (password !== undefined) body.set('password', password);
+    return fetch(`${base}/login`, {
+      method: 'POST',
+      body,
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      redirect: 'manual',
+    });
+  }
+
+  it('signs an admin in on the right password, without sending mail', async () => {
+    await repo.upsertUser('boss@example.com', true);
+
+    const response = await login('boss@example.com', 'correct horse battery');
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toBe('/');
+    expect(response.headers.get('set-cookie')).toMatch(/^session=/);
+    expect(sent).toEqual([]);
+  });
+
+  it('refuses an admin with the wrong password', async () => {
+    await repo.upsertUser('boss@example.com', true);
+
+    const response = await login('boss@example.com', 'guess');
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get('set-cookie')).toBeNull();
+    expect(sent).toEqual([]);
+  });
+
+  it('never lets a non-admin in with the admin password', async () => {
+    await repo.upsertUser('user@example.com', false);
+
+    const response = await login('user@example.com', 'correct horse battery');
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get('set-cookie')).toBeNull();
+    // No link either: a password attempt is never silently downgraded to one.
+    expect(sent).toEqual([]);
+  });
+
+  it('answers a wrong password and an unknown address identically, so probing reveals nothing', async () => {
+    await repo.upsertUser('boss@example.com', true);
+
+    const wrong = await login('boss@example.com', 'guess');
+    const unknown = await login('nobody@example.com', 'guess');
+
+    // Apart from the address echoed back into the form — which whoever typed it
+    // already knows — the two responses have to be indistinguishable.
+    const strip = (html: string) => html.replaceAll(/value="[^"]*"/g, 'value=""');
+
+    expect(unknown.status).toBe(wrong.status);
+    expect(strip(await unknown.text())).toBe(strip(await wrong.text()));
+  });
+
+  it('still emails a link to a non-admin who leaves the password empty', async () => {
+    await repo.upsertUser('user@example.com', false);
+
+    const response = await login('user@example.com', '');
+
+    expect(response.status).toBe(200);
+    expect(sent).toEqual(['user@example.com']);
+  });
+
+  it('tells an admin with an empty password to use it, rather than mailing a link', async () => {
+    await repo.upsertUser('boss@example.com', true);
+
+    const response = await login('boss@example.com', '');
+
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain('Administrators sign in with the password');
+    expect(sent).toEqual([]);
+  });
+
+  it('rate-limits password guessing', async () => {
+    await repo.upsertUser('boss@example.com', true);
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      expect((await login('boss@example.com', 'guess')).status).toBe(401);
+    }
+    // The sixth is refused before the password is even looked at.
+    expect((await login('boss@example.com', 'correct horse battery')).status).toBe(429);
+  });
+});
+
+describe('verifyAdminPassword', () => {
+  const config = loadConfig({
+    DATABASE_URL: 'postgres://localhost/test',
+    OPENROUTER_API_KEY: 'sk-or-test',
+    ADMIN_EMAILS: 'boss@example.com',
+    ADMIN_PASSWORD: 'a-long-enough-secret',
+  } as NodeJS.ProcessEnv);
+
+  it('accepts the configured password', async () => {
+    const auth = createAuth(config, await freshRepo());
+    expect(auth.verifyAdminPassword('a-long-enough-secret')).toBe(true);
+  });
+
+  it('rejects a wrong, empty, longer or shorter password', async () => {
+    const auth = createAuth(config, await freshRepo());
+
+    expect(auth.verifyAdminPassword('wrong')).toBe(false);
+    expect(auth.verifyAdminPassword('')).toBe(false);
+    expect(auth.verifyAdminPassword('a-long-enough-secret ')).toBe(false);
+    expect(auth.verifyAdminPassword('a-long-enough-secre')).toBe(false);
   });
 });
 
