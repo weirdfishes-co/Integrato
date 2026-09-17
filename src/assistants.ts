@@ -86,56 +86,38 @@ export interface BootstrapDeps {
   config: Config;
   /** Files shipped in the image, used to seed a brand-new assistant. */
   bundled: ContentPaths;
-  /** The single knowledge base from before multi-assistant support. */
-  legacy: ContentPaths;
 }
 
 /**
- * Makes sure at least one assistant exists and that nothing from the
- * single-assistant era is left stranded.
- *
- * On an existing install this runs once: it creates an assistant from
- * ASSISTANT_NAME, moves the old global settings onto it, attaches every
- * existing conversation and memory to it, grants it to all current users, and
- * seeds its knowledge base from the old location — so an upgrade keeps working
- * exactly as before, now as "the first assistant".
+ * Makes sure at least one assistant exists, so a fresh install has something to
+ * open. Named from ASSISTANT_NAME, granted to every user who already exists,
+ * and seeded with the bundled knowledge base.
  */
 export async function bootstrapAssistants({
   repo,
   config,
   bundled,
-  legacy,
 }: BootstrapDeps): Promise<Assistant> {
-  const existing = repo.listAssistants();
-  if (existing.length > 0) {
-    const first = existing[0];
-    if (!first) throw new AssistantError('Assistant list was not empty but held no assistant');
-    return first;
-  }
+  const existing = await repo.listAssistants();
+  const first = existing[0];
+  if (first) return first;
 
-  const slug = uniqueSlug(slugify(config.assistantName), (candidate) =>
-    repo.findAssistantBySlug(candidate) !== null,
+  // One query for the whole slug set beats one per candidate.
+  const taken = new Set(existing.map((assistant) => assistant.slug));
+  const slug = uniqueSlug(slugify(config.assistantName), (candidate) => taken.has(candidate));
+
+  const assistant = await repo.createAssistant(
+    slug,
+    config.assistantName,
+    '',
+    config.assistantLanguage,
   );
-  const assistant = repo.createAssistant(slug, config.assistantName, '', config.assistantLanguage);
   logger.info({ slug, name: assistant.name }, 'created the first assistant');
 
-  // Carry the old global settings over, so an upgrade changes no behaviour.
-  for (const { key, value } of repo.legacySettings()) {
-    repo.setSetting(assistant.id, key, value);
+  for (const user of await repo.listUsers()) {
+    await repo.grantAssistant(assistant.id, user.id);
   }
 
-  const moved = repo.attachOrphansToAssistant(assistant.id);
-  if (moved.conversations > 0 || moved.memories > 0) {
-    logger.info(moved, 'attached existing conversations and memories to the first assistant');
-  }
-
-  // Everyone who could use the app before can still use it.
-  for (const user of repo.listUsers()) {
-    repo.grantAssistant(assistant.id, user.id);
-  }
-
-  // Prefer the knowledge base that was already in use over the bundled files.
-  await provisionAssistant(config, assistant, legacy);
   await provisionAssistant(config, assistant, bundled);
   return assistant;
 }

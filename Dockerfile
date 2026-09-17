@@ -1,10 +1,9 @@
-# Multi-stage build: more deterministic than Nixpacks and safe for native modules.
+# Multi-stage build: more deterministic than Nixpacks, and it keeps the build
+# toolchain out of the runtime image.
 #
-# better-sqlite3 falls back to compiling from source when there is no prebuilt
-# binary for this Node version. That is why the production dependencies are
-# installed in the build stage too (which has a full toolchain) and copied as a
-# whole into the slim runtime. `npm ci` in the slim image would fail on a
-# missing Python/compiler.
+# Every dependency is now pure JavaScript — moving from better-sqlite3 to pg
+# removed the one native module — so this no longer has to work around a
+# compiler. The split is kept because the runtime image stays smaller for it.
 
 FROM node:22-bookworm AS deps
 WORKDIR /app
@@ -37,10 +36,9 @@ COPY context ./context
 # Default location of the database and the knowledge base; attach a volume here
 # on Railway. The knowledge base is editable through the admin page, so it has
 # to live on the volume — otherwise every change is gone on the next deploy.
-ENV DATABASE_PATH=/data/app.db \
-    CONTEXT_DIR=/data/context \
-    INSTRUCTIONS_PATH=/data/instr.md \
-    ASSISTANTS_DIR=/data/assistants
+# The database is a separate Postgres service (DATABASE_URL); the volume now
+# holds only the per-assistant knowledge bases.
+ENV ASSISTANTS_DIR=/data/assistants
 RUN mkdir -p /data && chown -R node:node /data /app/context /app/instr.md
 
 # The volume is mounted over /data at runtime and arrives owned by root, so the

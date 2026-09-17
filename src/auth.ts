@@ -39,35 +39,39 @@ function isApiRequest(req: Request): boolean {
 }
 
 export interface Auth {
-  issueLoginToken(user: User): { token: string; expiresAt: Date };
-  redeemLoginToken(token: string): User | null;
-  startSession(res: Response, user: User): void;
-  endSession(req: Request, res: Response): void;
-  currentUser(req: Request): User | null;
-  requireUser(req: Request, res: Response, next: NextFunction): void;
-  requireAdmin(req: Request, res: Response, next: NextFunction): void;
+  issueLoginToken(user: User): Promise<{ token: string; expiresAt: Date }>;
+  redeemLoginToken(token: string): Promise<User | null>;
+  startSession(res: Response, user: User): Promise<void>;
+  endSession(req: Request, res: Response): Promise<void>;
+  currentUser(req: Request): Promise<User | null>;
+  /**
+   * Express 5 forwards a rejected promise from a middleware to the error
+   * handler, so these may be async without wrapping.
+   */
+  requireUser(req: Request, res: Response, next: NextFunction): Promise<void>;
+  requireAdmin(req: Request, res: Response, next: NextFunction): Promise<void>;
 }
 
 export function createAuth(config: Config, repo: Repo): Auth {
   const secureCookie = config.appUrl.startsWith('https://');
 
   const auth: Auth = {
-    issueLoginToken(user) {
+    async issueLoginToken(user) {
       const token = generateToken();
       const expiresAt = minutesFromNow(config.loginTokenMinutes);
-      repo.createLoginToken(user.id, hashToken(token), expiresAt);
+      await repo.createLoginToken(user.id, hashToken(token), expiresAt);
       return { token, expiresAt };
     },
 
-    redeemLoginToken(token) {
+    async redeemLoginToken(token) {
       if (!token) return null;
       return repo.consumeLoginToken(hashToken(token));
     },
 
-    startSession(res, user) {
+    async startSession(res, user) {
       const token = generateToken();
       const expiresAt = daysFromNow(config.sessionDays);
-      repo.createSession(user.id, hashToken(token), expiresAt);
+      await repo.createSession(user.id, hashToken(token), expiresAt);
       res.cookie(SESSION_COOKIE, token, {
         httpOnly: true,
         secure: secureCookie,
@@ -77,28 +81,30 @@ export function createAuth(config: Config, repo: Repo): Auth {
       });
     },
 
-    endSession(req, res) {
+    async endSession(req, res) {
       const token = req.cookies?.[SESSION_COOKIE];
       if (typeof token === 'string' && token.length > 0) {
-        repo.deleteSession(hashToken(token));
+        await repo.deleteSession(hashToken(token));
       }
       res.clearCookie(SESSION_COOKIE, { path: '/' });
     },
 
-    currentUser(req) {
+    async currentUser(req) {
       if (req.user) return req.user;
       const token = req.cookies?.[SESSION_COOKIE];
       if (typeof token !== 'string' || token.length === 0) return null;
-      const user = repo.findUserBySessionToken(hashToken(token));
+      const user = await repo.findUserBySessionToken(hashToken(token));
       if (user) {
         req.user = user;
-        repo.touchUser(user.id);
+        // Fire and forget: "last seen" is for the admin table and must not add
+        // a round trip to every request. A failure is not worth surfacing.
+        void repo.touchUser(user.id).catch(() => undefined);
       }
       return user;
     },
 
-    requireUser(req, res, next) {
-      const user = auth.currentUser(req);
+    async requireUser(req, res, next) {
+      const user = await auth.currentUser(req);
       if (!user) {
         // Path-based, not based on the Accept header: a browser fetch sends
         // `*/*`, which would otherwise get a redirect where the frontend
@@ -113,8 +119,8 @@ export function createAuth(config: Config, repo: Repo): Auth {
       next();
     },
 
-    requireAdmin(req, res, next) {
-      const user = auth.currentUser(req);
+    async requireAdmin(req, res, next) {
+      const user = await auth.currentUser(req);
       if (!user) {
         if (isApiRequest(req)) {
           res.status(401).json({ error: 'Not signed in' });

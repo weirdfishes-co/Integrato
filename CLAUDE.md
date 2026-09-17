@@ -26,9 +26,9 @@ web-only (see Decisions).
 
 ## Stack
 
-Node 22 · TypeScript (ESM) · Express 5 · better-sqlite3 · nodemailer · pino ·
+Node 22 · TypeScript (ESM) · Express 5 · PostgreSQL (`pg`) · nodemailer · pino ·
 `openai` (pointed at OpenRouter) · vanilla JS and hand-written CSS on the front end.
-Hosted on Railway via a multi-stage Dockerfile.
+Hosted on Railway via a multi-stage Dockerfile, with Postgres as a separate service.
 
 ## Directories
 
@@ -70,13 +70,36 @@ context/*.md         knowledge base seeded into a brand-new assistant
 
 ## Decisions (and why)
 
-- **SQLite, not Postgres.** Small single-service app with few concurrent
-  writers. All SQL lives in `db/repo.ts`, so a move to Postgres stays a local
-  change. WAL is on. This does require a Railway volume on `/data` — without a
-  volume the data is gone on every deploy.
-- **Dockerfile instead of Nixpacks.** `better-sqlite3` is a native module and
-  Nixpacks regularly trips over it. The build stage runs on `node:22` (full
-  toolchain), the runtime on `node:22-bookworm-slim` with `--omit=dev`.
+- **PostgreSQL, not SQLite.** The app grew into a multi-user, multi-assistant
+  host, which is past the point where a single file on one volume is the right
+  answer. All SQL still lives in `db/repo.ts`. The volume is still needed, but
+  now only for the per-assistant knowledge bases — the database is a separate
+  Railway service reached through `DATABASE_URL`.
+- **The whole data layer is async, because the driver is.** `better-sqlite3` was
+  synchronous; `pg` is not. Every repo method returns a promise, and so do
+  `loadSettings`, `memorySection` and `auth.currentUser`. `requireUser` and
+  `requireAdmin` are async middleware — Express 5 forwards a rejected promise to
+  the error handler, so they need no wrapper. `views.ts` imports only *types*
+  from the repo, so the view layer stayed synchronous and untouched.
+- **Read the whole settings row set in one query.** `loadSettings` used to call
+  `getSetting` ten times, which was free on SQLite and would be ten round trips
+  here. `repo.allSettings()` fetches them as a map; this runs on every message.
+- **`touchUser` is deliberately not awaited.** "Last seen" feeds the admin table
+  only, and awaiting it would add a round trip to every authenticated request.
+  It is fired with `void` and its failure swallowed.
+- **Statements that wrote a row return it.** Postgres `RETURNING` (and a CTE for
+  `addMessage`, which also bumps `conversations.updated_at`) removed the
+  insert-then-select pairs SQLite needed. `consumeLoginToken` is one statement
+  for the same reason: a CTE updates the token and returns its user, so a link
+  cannot be redeemed twice even under two simultaneous requests.
+- **One baseline migration, not the old four.** The engine changed and no data
+  was carried across, so replaying a chain of SQLite ALTERs to arrive at a shape
+  we can state directly would have been pure ceremony. `001_baseline.sql` is
+  that shape; everything after it is forward-only again, numbered from 002.
+- **Dockerfile instead of Nixpacks**, for a deterministic build and a runtime
+  image without the toolchain. Moving from `better-sqlite3` to `pg` removed the
+  last native module, so the build no longer has to work around a compiler —
+  the stage split is kept only because it keeps the runtime image small.
 - **Bundle the server with esbuild, no `tsx` in production.** Transpiling at
   startup costs enough time to fail Railway's health check. `tsx` is a dev
   dependency only. `scripts/build.mjs` copies `src/db/migrations/` to
@@ -232,11 +255,17 @@ context/*.md         knowledge base seeded into a brand-new assistant
   otherwise, so a blocked outbound port leaves `POST /login` hanging for minutes
   with no response — the user sees an endless spinner rather than an error. The
   timeouts turn that into a 502 with a readable message in ten seconds.
-- **Never set `DATABASE_PATH`, `CONTEXT_DIR` or `INSTRUCTIONS_PATH` to a
-  relative path in a deployed environment.** The image points all three at
-  `/data`; a value copied from `.env` such as `./data/app.db` resolves inside
-  `/app`, which the `node` user cannot write, and the boot fails with
-  `EACCES: permission denied, mkdir './data'`.
+- **Never set `ASSISTANTS_DIR` to a relative path in a deployed environment.**
+  The image points it at `/data`; a value copied from `.env` such as
+  `./data/assistants` resolves inside `/app`, which the `node` user cannot
+  write. `DATABASE_PATH`, `CONTEXT_DIR` and `INSTRUCTIONS_PATH` no longer exist
+  — delete them wherever they are still set.
+- **Tests run against a real PostgreSQL in Docker.** `tests/global-setup.ts`
+  starts one container for the whole run and each case gets its own schema
+  (`tests/helpers/db.ts`), which costs milliseconds where a container each would
+  cost seconds. Docker must therefore be available to run the suite. An
+  in-memory emulation was rejected: it would pass SQL that production rejects,
+  which is the one thing this move needed protection against.
 - **The container starts as root on purpose.** Railway bind-mounts the volume
   over `/data` at runtime and it arrives owned by root, which hides the
   build-time `chown`. `scripts/entrypoint.sh` therefore fixes ownership and then

@@ -60,10 +60,10 @@ export async function compactConversation(
 ): Promise<void> {
   if (!settings.compaction) return;
 
-  const messages = repo.listMessages(conversationId);
+  const messages = await repo.listMessages(conversationId);
   if (messages.length <= COMPACT_THRESHOLD) return;
 
-  const conversation = repo.findConversationById(conversationId);
+  const conversation = await repo.findConversationById(conversationId);
   if (!conversation) return;
 
   const olderThanKept = messages.slice(0, -KEEP_VERBATIM);
@@ -89,7 +89,7 @@ export async function compactConversation(
     const text = parseSummary(summary);
     if (text.length === 0) return;
 
-    repo.setConversationSummary(conversationId, text, last.id);
+    await repo.setConversationSummary(conversationId, text, last.id);
     logger.info({ conversationId, compacted: pending.length }, 'conversation compacted');
   } catch (error) {
     logger.warn({ err: error, conversationId }, 'compaction failed');

@@ -47,12 +47,12 @@ export function createContentRouter({ auth, views, config, repo }: ContentRouteD
   router.use(express.json({ limit: bodyLimit }));
 
   /** Resolves :id into an assistant plus a store over its own directory. */
-  function resolve(
+  async function resolve(
     req: express.Request,
     res: express.Response,
-  ): { assistant: Assistant; store: ContentStore; base: string } | null {
+  ): Promise<{ assistant: Assistant; store: ContentStore; base: string } | null> {
     const id = Number.parseInt(String((req.params as Record<string, string>).id ?? ''), 10);
-    const assistant = Number.isInteger(id) ? repo.findAssistantById(id) : null;
+    const assistant = Number.isInteger(id) ? await repo.findAssistantById(id) : null;
     if (!assistant) {
       res.status(404).type('html').send(views.errorPage(404, 'This assistant does not exist.'));
       return null;
@@ -70,7 +70,7 @@ export function createContentRouter({ auth, views, config, repo }: ContentRouteD
   });
 
   router.get('/', async (req, res, next) => {
-    const found = resolve(req, res);
+    const found = await resolve(req, res);
     if (!found) return;
     try {
       const [documents, instructions] = await Promise.all([
@@ -92,7 +92,7 @@ export function createContentRouter({ auth, views, config, repo }: ContentRouteD
   // ---- base prompt ----------------------------------------------------------
 
   router.get('/instructions', async (req, res, next) => {
-    const found = resolve(req, res);
+    const found = await resolve(req, res);
     if (!found) return;
     try {
       res.type('html').send(
@@ -114,7 +114,7 @@ export function createContentRouter({ auth, views, config, repo }: ContentRouteD
   });
 
   router.post('/instructions', async (req, res, next) => {
-    const found = resolve(req, res);
+    const found = await resolve(req, res);
     if (!found) return;
     try {
       const content = typeof req.body?.content === 'string' ? req.body.content : '';
@@ -132,7 +132,7 @@ export function createContentRouter({ auth, views, config, repo }: ContentRouteD
   // ---- context documents ----------------------------------------------------
 
   router.get('/edit', async (req, res, next) => {
-    const found = resolve(req, res);
+    const found = await resolve(req, res);
     if (!found) return;
     const name = typeof req.query.name === 'string' ? req.query.name : '';
     try {
@@ -155,7 +155,7 @@ export function createContentRouter({ auth, views, config, repo }: ContentRouteD
   });
 
   router.post('/edit', async (req, res, next) => {
-    const found = resolve(req, res);
+    const found = await resolve(req, res);
     if (!found) return;
     const name = typeof req.query.name === 'string' ? req.query.name : '';
     try {
@@ -169,7 +169,7 @@ export function createContentRouter({ auth, views, config, repo }: ContentRouteD
   });
 
   router.post('/new', async (req, res, next) => {
-    const found = resolve(req, res);
+    const found = await resolve(req, res);
     if (!found) return;
     const raw = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
     const name = raw.toLowerCase().endsWith('.md') ? raw : `${raw}.md`;
@@ -186,7 +186,7 @@ export function createContentRouter({ auth, views, config, repo }: ContentRouteD
   });
 
   router.post('/delete', async (req, res, next) => {
-    const found = resolve(req, res);
+    const found = await resolve(req, res);
     if (!found) return;
     const name = typeof req.body?.name === 'string' ? req.body.name : '';
     try {
@@ -200,7 +200,7 @@ export function createContentRouter({ auth, views, config, repo }: ContentRouteD
 
   /** JSON upload: [{ name, content }]. Existing files are overwritten. */
   router.post('/upload', async (req, res) => {
-    const found = resolve(req, res);
+    const found = await resolve(req, res);
     if (!found) return;
     const files: unknown = req.body?.files;
     if (!Array.isArray(files) || files.length === 0) {

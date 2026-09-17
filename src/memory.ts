@@ -40,8 +40,12 @@ export interface MemoryDeps {
 }
 
 /** The block prepended to the system prompt, or null when there is nothing yet. */
-export function memorySection(repo: Repo, userId: number, assistantId: number): string | null {
-  const memories = repo.listMemories(userId, assistantId, MAX_MEMORIES_IN_PROMPT);
+export async function memorySection(
+  repo: Repo,
+  userId: number,
+  assistantId: number,
+): Promise<string | null> {
+  const memories = await repo.listMemories(userId, assistantId, MAX_MEMORIES_IN_PROMPT);
   if (memories.length === 0) return null;
 
   const lines = memories.map((memory) => `- ${memory.content}`).join('\n');
@@ -94,11 +98,13 @@ export async function rememberExchange(
     if (facts.length === 0) return;
 
     const known = new Set(
-      repo.listMemories(userId, assistantId, 200).map((memory) => memory.content.toLowerCase()),
+      (await repo.listMemories(userId, assistantId, 200)).map((memory) =>
+        memory.content.toLowerCase(),
+      ),
     );
     const fresh = facts.filter((fact) => !known.has(fact.toLowerCase()));
     for (const fact of fresh) {
-      repo.addMemory(userId, assistantId, fact);
+      await repo.addMemory(userId, assistantId, fact);
     }
     if (fresh.length > 0) {
       logger.info({ userId, assistantId, stored: fresh.length }, 'memories stored');

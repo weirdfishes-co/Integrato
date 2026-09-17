@@ -22,8 +22,8 @@ export function createAuthRouter({ config, repo, auth, mailer, views }: AuthRout
   const router = Router();
   const limiter = createRateLimiter(5, 15 * 60 * 1000);
 
-  router.get('/login', (req, res) => {
-    if (auth.currentUser(req)) {
+  router.get('/login', async (req, res) => {
+    if (await auth.currentUser(req)) {
       res.redirect('/');
       return;
     }
@@ -48,9 +48,9 @@ export function createAuthRouter({ config, repo, auth, mailer, views }: AuthRout
         return;
       }
 
-      const user = repo.findUserByEmail(email);
+      const user = await repo.findUserByEmail(email);
       if (user) {
-        const { token } = auth.issueLoginToken(user);
+        const { token } = await auth.issueLoginToken(user);
         const link = `${config.appUrl}/auth/callback?token=${encodeURIComponent(token)}`;
         try {
           await mailer.sendMagicLink(user.email, link, config.loginTokenMinutes);
@@ -73,9 +73,9 @@ export function createAuthRouter({ config, repo, auth, mailer, views }: AuthRout
     }
   });
 
-  router.get('/auth/callback', (req, res) => {
+  router.get('/auth/callback', async (req, res) => {
     const token = typeof req.query.token === 'string' ? req.query.token : '';
-    const user = auth.redeemLoginToken(token);
+    const user = await auth.redeemLoginToken(token);
 
     if (!user) {
       res
@@ -85,13 +85,13 @@ export function createAuthRouter({ config, repo, auth, mailer, views }: AuthRout
       return;
     }
 
-    auth.startSession(res, user);
+    await auth.startSession(res, user);
     logger.info({ userId: user.id }, 'user signed in');
     res.redirect('/');
   });
 
-  router.post('/logout', (req, res) => {
-    auth.endSession(req, res);
+  router.post('/logout', async (req, res) => {
+    await auth.endSession(req, res);
     res.redirect('/login');
   });
 

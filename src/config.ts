@@ -70,10 +70,8 @@ export interface Config {
   readonly assistantName: string;
   /** Language the assistant answers in, regardless of what the user writes. */
   readonly assistantLanguage: string;
-  readonly databasePath: string;
+  readonly databaseUrl: string;
   /** Writable location of the knowledge base; empty = the bundled files. */
-  readonly contextDir: string | undefined;
-  readonly instructionsPath: string | undefined;
   /** Root under which each assistant gets its own knowledge-base directory. */
   readonly assistantsDir: string;
   readonly logLevel: string;
@@ -131,9 +129,7 @@ export function loadConfig(env: Env = process.env): Config {
     appUrl,
     assistantName,
     assistantLanguage: optional(env, 'ASSISTANT_LANGUAGE', 'English'),
-    databasePath: optional(env, 'DATABASE_PATH', './data/app.db'),
-    contextDir: env.CONTEXT_DIR?.trim() || undefined,
-    instructionsPath: env.INSTRUCTIONS_PATH?.trim() || undefined,
+    databaseUrl: required(env, 'DATABASE_URL'),
     assistantsDir: optional(env, 'ASSISTANTS_DIR', './data/assistants'),
     logLevel: optional(env, 'LOG_LEVEL', 'info'),
     openRouterApiKey: required(env, 'OPENROUTER_API_KEY'),

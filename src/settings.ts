@@ -46,20 +46,23 @@ export type SettingKey = keyof typeof KEYS;
 export const MAX_SEARCH_RESULTS = 20;
 const DEFAULT_SEARCH_RESULTS = 5;
 
-function readBoolean(repo: Repo, assistantId: number, key: string, fallback: boolean): boolean {
-  const raw = repo.getSetting(assistantId, key);
-  if (raw === null) return fallback;
+/** All settings are read in one query, so these work on the resulting map. */
+type Stored = ReadonlyMap<string, string>;
+
+function readBoolean(stored: Stored, key: string, fallback: boolean): boolean {
+  const raw = stored.get(key);
+  if (raw === undefined) return fallback;
   return raw === '1';
 }
 
-function readEffort(repo: Repo, assistantId: number, fallback: Effort): Effort {
-  const raw = repo.getSetting(assistantId, KEYS.effort);
+function readEffort(stored: Stored, fallback: Effort): Effort {
+  const raw = stored.get(KEYS.effort);
   const match = EFFORT_LEVELS.find((level) => level === raw);
   return match ?? fallback;
 }
 
-function readCount(repo: Repo, assistantId: number, key: string, fallback: number): number {
-  const parsed = Number.parseInt(repo.getSetting(assistantId, key) ?? '', 10);
+function readCount(stored: Stored, key: string, fallback: number): number {
+  const parsed = Number.parseInt(stored.get(key) ?? '', 10);
   if (!Number.isInteger(parsed) || parsed < 1) return fallback;
   return Math.min(parsed, MAX_SEARCH_RESULTS);
 }
@@ -73,35 +76,45 @@ export function parseDomains(raw: string): string[] {
     .slice(0, 64);
 }
 
-function readDomains(repo: Repo, assistantId: number, key: string): string[] {
-  return parseDomains(repo.getSetting(assistantId, key) ?? '');
+function readDomains(stored: Stored, key: string): string[] {
+  return parseDomains(stored.get(key) ?? '');
 }
 
-export function loadSettings(repo: Repo, config: Config, assistantId: number): AssistantSettings {
+/** One query, not one per setting: this runs on every chat message. */
+export async function loadSettings(
+  repo: Repo,
+  config: Config,
+  assistantId: number,
+): Promise<AssistantSettings> {
+  const stored = await repo.allSettings(assistantId);
   return {
-    model: repo.getSetting(assistantId, KEYS.model) ?? config.defaultModel,
-    effort: readEffort(repo, assistantId, config.effort),
-    showThinking: readBoolean(repo, assistantId, KEYS.showThinking, false),
-    webSearch: readBoolean(repo, assistantId, KEYS.webSearch, false),
-    webSearchMaxResults: readCount(repo, assistantId, KEYS.webSearchMaxResults, DEFAULT_SEARCH_RESULTS),
-    webSearchIncludeDomains: readDomains(repo, assistantId, KEYS.webSearchIncludeDomains),
-    webSearchExcludeDomains: readDomains(repo, assistantId, KEYS.webSearchExcludeDomains),
-    memory: readBoolean(repo, assistantId, KEYS.memory, false),
-    citations: readBoolean(repo, assistantId, KEYS.citations, false),
-    compaction: readBoolean(repo, assistantId, KEYS.compaction, false),
+    model: stored.get(KEYS.model) ?? config.defaultModel,
+    effort: readEffort(stored, config.effort),
+    showThinking: readBoolean(stored, KEYS.showThinking, false),
+    webSearch: readBoolean(stored, KEYS.webSearch, false),
+    webSearchMaxResults: readCount(stored, KEYS.webSearchMaxResults, DEFAULT_SEARCH_RESULTS),
+    webSearchIncludeDomains: readDomains(stored, KEYS.webSearchIncludeDomains),
+    webSearchExcludeDomains: readDomains(stored, KEYS.webSearchExcludeDomains),
+    memory: readBoolean(stored, KEYS.memory, false),
+    citations: readBoolean(stored, KEYS.citations, false),
+    compaction: readBoolean(stored, KEYS.compaction, false),
   };
 }
 
 /** Writes the settings an admin submitted; unchanged values are rewritten as-is. */
-export function saveSettings(repo: Repo, assistantId: number, settings: AssistantSettings): void {
-  repo.setSetting(assistantId, KEYS.model, settings.model);
-  repo.setSetting(assistantId, KEYS.effort, settings.effort);
-  repo.setSetting(assistantId, KEYS.showThinking, settings.showThinking ? '1' : '0');
-  repo.setSetting(assistantId, KEYS.webSearch, settings.webSearch ? '1' : '0');
-  repo.setSetting(assistantId, KEYS.webSearchMaxResults, String(settings.webSearchMaxResults));
-  repo.setSetting(assistantId, KEYS.webSearchIncludeDomains, settings.webSearchIncludeDomains.join('\n'));
-  repo.setSetting(assistantId, KEYS.webSearchExcludeDomains, settings.webSearchExcludeDomains.join('\n'));
-  repo.setSetting(assistantId, KEYS.memory, settings.memory ? '1' : '0');
-  repo.setSetting(assistantId, KEYS.citations, settings.citations ? '1' : '0');
-  repo.setSetting(assistantId, KEYS.compaction, settings.compaction ? '1' : '0');
+export async function saveSettings(
+  repo: Repo,
+  assistantId: number,
+  settings: AssistantSettings,
+): Promise<void> {
+  await repo.setSetting(assistantId, KEYS.model, settings.model);
+  await repo.setSetting(assistantId, KEYS.effort, settings.effort);
+  await repo.setSetting(assistantId, KEYS.showThinking, settings.showThinking ? '1' : '0');
+  await repo.setSetting(assistantId, KEYS.webSearch, settings.webSearch ? '1' : '0');
+  await repo.setSetting(assistantId, KEYS.webSearchMaxResults, String(settings.webSearchMaxResults));
+  await repo.setSetting(assistantId, KEYS.webSearchIncludeDomains, settings.webSearchIncludeDomains.join('\n'));
+  await repo.setSetting(assistantId, KEYS.webSearchExcludeDomains, settings.webSearchExcludeDomains.join('\n'));
+  await repo.setSetting(assistantId, KEYS.memory, settings.memory ? '1' : '0');
+  await repo.setSetting(assistantId, KEYS.citations, settings.citations ? '1' : '0');
+  await repo.setSetting(assistantId, KEYS.compaction, settings.compaction ? '1' : '0');
 }

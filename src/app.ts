@@ -7,7 +7,7 @@ import express, { type Express, type NextFunction, type Request, type Response }
 import { createAuth } from './auth.js';
 import type { Config } from './config.js';
 import type { ContentPaths } from './content.js';
-import { openDatabase, type Db } from './db/index.js';
+import type { Db } from './db/index.js';
 import { createRepo, type Repo } from './db/repo.js';
 import { createChatClient } from './llm.js';
 import { logger } from './logger.js';
@@ -27,33 +27,22 @@ export interface App {
   readonly db: Db;
   readonly repo: Repo;
   /** Where the knowledge base actually lives; seeding into it happens in server.ts. */
-  readonly content: ContentPaths;
   readonly bundledContent: ContentPaths;
 }
 
-export function createApp(config: Config): App {
-  // The bundled files live in the image and are not reliably writable;
-  // CONTEXT_DIR/INSTRUCTIONS_PATH point at the volume on Railway.
+/**
+ * Builds the Express app over an already-open database. Opening it is the
+ * caller's job (server.ts) because migrations are async and must finish before
+ * the first request, not race it.
+ */
+export function createApp(config: Config, db: Db): App {
+  // Shipped in the image and copied into each new assistant's own directory.
   const bundledContent: ContentPaths = {
     contextDir: join(projectRoot, 'context'),
     instructionsPath: join(projectRoot, 'instr.md'),
   };
-  const content: ContentPaths = {
-    contextDir: config.contextDir ? resolve(config.contextDir) : bundledContent.contextDir,
-    instructionsPath: config.instructionsPath
-      ? resolve(config.instructionsPath)
-      : bundledContent.instructionsPath,
-  };
 
-  const db = openDatabase(config.databasePath);
   const repo = createRepo(db);
-
-  // Admins from the environment always exist: that way you can sign in right
-  // after an empty database and manage the rest of the user list.
-  for (const email of config.adminEmails) {
-    repo.upsertUser(email, true);
-  }
-
   const auth = createAuth(config, repo);
   const mailer = createMailer(config);
   const chat = createChatClient(config);
@@ -106,5 +95,5 @@ export function createApp(config: Config): App {
     res.status(500).type('html').send(views.errorPage(500, 'Something went wrong on our side.'));
   });
 
-  return { express: app, db, repo, content, bundledContent };
+  return { express: app, db, repo, bundledContent };
 }

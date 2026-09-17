@@ -1,21 +1,31 @@
 import { createApp } from './app.js';
 import { bootstrapAssistants } from './assistants.js';
 import { loadConfig } from './config.js';
+import { openDatabase } from './db/index.js';
 import { logger } from './logger.js';
 
 const config = loadConfig();
-const { express: app, db, repo, content, bundledContent } = createApp(config);
 
-// Creates the first assistant on a fresh install, and on an upgrade moves the
-// single knowledge base, settings, conversations and memories onto it.
-const first = await bootstrapAssistants({ repo, config, bundled: bundledContent, legacy: content });
+// Migrations run here, before the app is built and long before it listens.
+const db = await openDatabase(config.databaseUrl);
+const { express: app, repo, bundledContent } = createApp(config, db);
+
+// Admins from the environment always exist: that way you can sign in right
+// after an empty database and manage the rest of the user list.
+for (const email of config.adminEmails) {
+  await repo.upsertUser(email, true);
+}
+
+const first = await bootstrapAssistants({ repo, config, bundled: bundledContent });
+
+const assistantCount = (await repo.listAssistants()).length;
 
 const server = app.listen(config.port, '0.0.0.0', () => {
   logger.info(
     {
       port: config.port,
       appUrl: config.appUrl,
-      assistants: repo.listAssistants().length,
+      assistants: assistantCount,
       first: first.slug,
     },
     'server started',
@@ -25,11 +35,9 @@ const server = app.listen(config.port, '0.0.0.0', () => {
 // Periodically purge expired sessions and sign-in links.
 const cleanup = setInterval(
   () => {
-    try {
-      repo.purgeExpired();
-    } catch (error) {
+    repo.purgeExpired().catch((error: unknown) => {
       logger.error({ err: error }, 'purging expired tokens failed');
-    }
+    });
   },
   60 * 60 * 1000,
 );
@@ -50,9 +58,10 @@ function shutdown(signal: string): void {
 
   server.close(() => {
     clearInterval(cleanup);
-    db.close();
-    logger.info('shut down cleanly');
-    process.exit(0);
+    void db.close().finally(() => {
+      logger.info('shut down cleanly');
+      process.exit(0);
+    });
   });
 }
 

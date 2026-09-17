@@ -3,12 +3,12 @@
 A host for several configurable chat assistants, on any model OpenRouter offers.
 Each assistant has its own instructions, knowledge base, model settings and list
 of users. People sign in with a magic link, pick an assistant they have access
-to, and their conversations are kept per assistant in SQLite.
+to, and their conversations are kept per assistant in PostgreSQL.
 
-- **Stack**: Node 22, TypeScript, Express 5, SQLite (better-sqlite3)
+- **Stack**: Node 22, TypeScript, Express 5, PostgreSQL
 - **Model access**: OpenRouter (OpenAI-compatible API), one key for every model
 - **Email**: Brevo HTTP API, with SMTP as an alternative
-- **Hosting**: Railway (Dockerfile + persistent volume for the database)
+- **Hosting**: Railway (Dockerfile + a Postgres service + a volume for the knowledge bases)
 - **Auth**: magic link over email, 30-day cookie session
 - **Admin**: `/admin` for users, assistants and the OpenRouter balance;
   `/admin/assistants/:id` for one assistant's settings, access and knowledge base
@@ -22,14 +22,21 @@ For the architecture and the reasoning behind the choices: see [CLAUDE.md](CLAUD
 ## Running locally
 
 ```bash
+docker run -d --name assistant-db -e POSTGRES_PASSWORD=dev \
+  -e POSTGRES_DB=assistant -p 5432:5432 postgres:17-alpine
+
 npm install
-cp .env.example .env      # fill in OPENROUTER_API_KEY, ADMIN_EMAILS and the mail settings
+cp .env.example .env      # fill in DATABASE_URL, OPENROUTER_API_KEY, ADMIN_EMAILS, mail
 npm run dev               # http://localhost:3000
 ```
 
-The database is created automatically at `DATABASE_PATH` (default
-`./data/app.db`) and migrations run at startup. The addresses in `ADMIN_EMAILS`
-are written into the user list as admins on every boot, so you can always get in.
+The schema is created automatically: migrations run in-process at startup
+against `DATABASE_URL`. The addresses in `ADMIN_EMAILS` are written into the
+user list as admins on every boot, so you can always get in.
+
+`npm test` needs Docker too — it starts a throwaway PostgreSQL container and
+runs the real migrations against it, so a mistake in the SQL fails in the suite
+rather than in production.
 
 **Sending mail.** Set `BREVO_API_KEY` to send over Brevo's HTTP API, or
 `SMTP_HOST` (plus `SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`) to send over SMTP. The API
@@ -242,12 +249,17 @@ which the `Retry-After` header times.
 
 1. **Create a service** from this repo. Railway picks up `railway.json` and
    builds with the `Dockerfile`.
-2. **Attach a volume** with mount path `/data`. Without a volume the database is
-   gone on every deploy — the container file system is ephemeral.
-3. **Set the environment variables** (see `.env.example`):
+2. **Add a PostgreSQL service** from Railway's plugin list. It provides
+   `DATABASE_URL`; reference it from the app service and the schema is created
+   on the first boot.
+3. **Attach a volume** with mount path `/data`. The database no longer lives
+   here, but the per-assistant knowledge bases do — without a volume every
+   document an admin writes is gone on the next deploy.
+4. **Set the environment variables** (see `.env.example`):
 
    | Variable | Required | Notes |
    | --- | --- | --- |
+   | `DATABASE_URL` | yes | PostgreSQL connection string; Railway's Postgres service supplies it |
    | `OPENROUTER_API_KEY` | yes | API key from [openrouter.ai/keys](https://openrouter.ai/keys) |
    | `ADMIN_EMAILS` | yes | Comma-separated admins; always granted rights at boot |
    | `BREVO_API_KEY` | yes* | Brevo HTTP API key — the reliable option on Railway |
@@ -258,9 +270,7 @@ which the `Retry-After` header times.
    | `ASSISTANT_NAME` | no | Name of the *first* assistant on a fresh install, and the sign-in email's sender name |
    | `ASSISTANT_LANGUAGE` | no | Answer language of the first assistant; each assistant carries its own afterwards |
    | `APP_URL` | yes | Public URL, e.g. `https://assistant.up.railway.app`. Magic links are built on this; `https://` sets the Secure flag on the cookie |
-   | `DATABASE_PATH` | no | Default `/data/app.db` in the image |
    | `ASSISTANTS_DIR` | no | Default `/data/assistants` in the image — one directory per assistant. Keep it on the volume, or every knowledge base is lost on deploy |
-   | `CONTEXT_DIR` / `INSTRUCTIONS_PATH` | no | The pre-multi-assistant knowledge base, read once when upgrading an existing install |
    | `OPENROUTER_MODEL` | no | Starting model, default `anthropic/claude-opus-5`. An admin's choice on `/admin` overrides it |
    | `MODEL_EFFORT` / `MODEL_MAX_TOKENS` | no | Default `high` and `8000`. Effort is `low`–`max`; only reasoning models act on it |
    | `OPENROUTER_SITE_URL` / `OPENROUTER_SITE_NAME` | no | Optional attribution on the openrouter.ai rankings |
@@ -272,13 +282,14 @@ which the `Retry-After` header times.
    2525 or 465, which surfaced as `Connection timeout` and no email.
 
    Railway sets `PORT` itself; the server binds on `0.0.0.0`. Do not set
-   `DATABASE_PATH`, `CONTEXT_DIR` or `INSTRUCTIONS_PATH` to relative paths — the
-   image already points them at the volume, and a relative value resolves inside
-   `/app`, where the server cannot write.
-4. **Volume ownership is handled for you.** The mounted volume arrives owned by
+   `ASSISTANTS_DIR` to a relative path — the image already points it at the
+   volume, and a relative value resolves inside `/app`, where the server cannot
+   write. `DATABASE_PATH`, `CONTEXT_DIR` and `INSTRUCTIONS_PATH` are gone; remove
+   them if they are still set.
+5. **Volume ownership is handled for you.** The mounted volume arrives owned by
    root; `scripts/entrypoint.sh` takes ownership of it and then runs the server
    as the unprivileged `node` user.
-5. **The health check** is on `/healthz`. Migrations run inside the server
+6. **The health check** is on `/healthz`. Migrations run inside the server
    process, so there is no separate migration command.
 
 Test the container locally the way Railway runs it:

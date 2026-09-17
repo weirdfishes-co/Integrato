@@ -48,12 +48,12 @@ export function createChatRouter({ config, repo, auth, chat, views }: ChatRouteD
    * user may not use it — both as 404, so the two are indistinguishable to
    * someone probing for assistant names.
    */
-  function resolveAssistant(req: Request, res: Response): Assistant | null {
+  async function resolveAssistant(req: Request, res: Response): Promise<Assistant | null> {
     const slug = typeof req.params.slug === 'string' ? req.params.slug : '';
-    const assistant = repo.findAssistantBySlug(slug);
+    const assistant = await repo.findAssistantBySlug(slug);
     const user = req.user!;
 
-    if (!assistant || !repo.canUseAssistant(user.id, user.isAdmin, assistant.id)) {
+    if (!assistant || !(await repo.canUseAssistant(user.id, user.isAdmin, assistant.id))) {
       if (req.path.startsWith('/api/')) {
         res.status(404).json({ error: 'Assistant not found' });
       } else {
@@ -65,9 +65,9 @@ export function createChatRouter({ config, repo, auth, chat, views }: ChatRouteD
   }
 
   /** The picker: what this user is allowed to talk to. */
-  router.get('/', auth.requireUser, (req, res) => {
+  router.get('/', auth.requireUser, async (req, res) => {
     const user = req.user!;
-    const assistants = repo.listAssistantsForUser(user.id, user.isAdmin);
+    const assistants = await repo.listAssistantsForUser(user.id, user.isAdmin);
 
     // With exactly one there is nothing to choose, so go straight in.
     if (assistants.length === 1 && assistants[0]) {
@@ -77,49 +77,49 @@ export function createChatRouter({ config, repo, auth, chat, views }: ChatRouteD
     res.type('html').send(views.pickerPage(user, assistants));
   });
 
-  router.get('/a/:slug', auth.requireUser, (req, res) => {
-    const assistant = resolveAssistant(req, res);
+  router.get('/a/:slug', auth.requireUser, async (req, res) => {
+    const assistant = await resolveAssistant(req, res);
     if (!assistant) return;
-    const others = repo.listAssistantsForUser(req.user!.id, req.user!.isAdmin).length;
+    const others = (await repo.listAssistantsForUser(req.user!.id, req.user!.isAdmin)).length;
     res.type('html').send(views.chatPage(req.user!, assistant, others > 1));
   });
 
-  router.get('/api/a/:slug/conversations', auth.requireUser, (req, res) => {
-    const assistant = resolveAssistant(req, res);
+  router.get('/api/a/:slug/conversations', auth.requireUser, async (req, res) => {
+    const assistant = await resolveAssistant(req, res);
     if (!assistant) return;
-    res.json({ conversations: repo.listConversations(req.user!.id, assistant.id) });
+    res.json({ conversations: await repo.listConversations(req.user!.id, assistant.id) });
   });
 
-  router.post('/api/a/:slug/conversations', auth.requireUser, (req, res) => {
-    const assistant = resolveAssistant(req, res);
+  router.post('/api/a/:slug/conversations', auth.requireUser, async (req, res) => {
+    const assistant = await resolveAssistant(req, res);
     if (!assistant) return;
-    const conversation = repo.createConversation(req.user!.id, assistant.id, UNTITLED);
+    const conversation = await repo.createConversation(req.user!.id, assistant.id, UNTITLED);
     res.status(201).json({ conversation, messages: [] });
   });
 
-  router.get('/api/a/:slug/conversations/:id', auth.requireUser, (req, res) => {
-    const assistant = resolveAssistant(req, res);
+  router.get('/api/a/:slug/conversations/:id', auth.requireUser, async (req, res) => {
+    const assistant = await resolveAssistant(req, res);
     if (!assistant) return;
     const id = parseId(req.params.id);
-    const conversation = id === null ? null : repo.findConversation(id, req.user!.id);
+    const conversation = id === null ? null : await repo.findConversation(id, req.user!.id);
     if (!conversation || conversation.assistantId !== assistant.id) {
       res.status(404).json({ error: 'Conversation not found' });
       return;
     }
-    res.json({ conversation, messages: repo.listMessages(conversation.id) });
+    res.json({ conversation, messages: await repo.listMessages(conversation.id) });
   });
 
-  router.delete('/api/a/:slug/conversations/:id', auth.requireUser, (req, res) => {
-    const assistant = resolveAssistant(req, res);
+  router.delete('/api/a/:slug/conversations/:id', auth.requireUser, async (req, res) => {
+    const assistant = await resolveAssistant(req, res);
     if (!assistant) return;
     const id = parseId(req.params.id);
     if (id === null) {
       res.status(400).json({ error: 'Invalid conversation id' });
       return;
     }
-    const conversation = repo.findConversation(id, req.user!.id);
+    const conversation = await repo.findConversation(id, req.user!.id);
     if (conversation && conversation.assistantId === assistant.id) {
-      repo.deleteConversation(id, req.user!.id);
+      await repo.deleteConversation(id, req.user!.id);
     }
     res.status(204).end();
   });
@@ -131,12 +131,12 @@ export function createChatRouter({ config, repo, auth, chat, views }: ChatRouteD
    */
   router.post('/api/a/:slug/conversations/:id/messages', auth.requireUser, async (req, res, next) => {
     const user = req.user!;
-    const assistant = resolveAssistant(req, res);
+    const assistant = await resolveAssistant(req, res);
     if (!assistant) return;
 
     const id = parseId(req.params.id);
     const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
-    const existing = id === null ? null : repo.findConversation(id, user.id);
+    const existing = id === null ? null : await repo.findConversation(id, user.id);
 
     if (!existing || existing.assistantId !== assistant.id) {
       res.status(404).json({ error: 'Conversation not found' });
@@ -152,7 +152,7 @@ export function createChatRouter({ config, repo, auth, chat, views }: ChatRouteD
     }
 
     try {
-      const settings = loadSettings(repo, config, assistant.id);
+      const settings = await loadSettings(repo, config, assistant.id);
       const paths = assistantPaths(config, assistant.slug);
       const basePrompt = await buildSystemPrompt({
         instructionsPath: paths.instructionsPath,
@@ -164,14 +164,14 @@ export function createChatRouter({ config, repo, auth, chat, views }: ChatRouteD
 
       // Memory goes after the cached knowledge base, so a new fact for one user
       // does not invalidate the shared prompt prefix for everyone else.
-      const memories = settings.memory ? memorySection(repo, user.id, assistant.id) : null;
+      const memories = settings.memory ? await memorySection(repo, user.id, assistant.id) : null;
       const systemPrompt = memories ? `${basePrompt}\n\n${memories}` : basePrompt;
 
       const conversationId = existing.id;
-      const stored = repo.addMessage(conversationId, 'user', prompt);
+      const stored = await repo.addMessage(conversationId, 'user', prompt);
 
       const history = historyWithSummary(
-        repo.listMessages(conversationId),
+        await repo.listMessages(conversationId),
         settings.compaction ? existing.summary : null,
         HISTORY_LIMIT,
       );
@@ -211,7 +211,7 @@ export function createChatRouter({ config, repo, auth, chat, views }: ChatRouteD
       } catch (error) {
         if (abort.signal.aborted) {
           // The client dropped the connection; keep whatever already arrived.
-          if (answer.trim().length > 0) repo.addMessage(conversationId, 'assistant', answer);
+          if (answer.trim().length > 0) await repo.addMessage(conversationId, 'assistant', answer);
           res.end();
           return;
         }
@@ -223,12 +223,12 @@ export function createChatRouter({ config, repo, auth, chat, views }: ChatRouteD
         return;
       }
 
-      repo.addMessage(conversationId, 'assistant', answer);
+      await repo.addMessage(conversationId, 'assistant', answer);
 
       // The first user message determines the title of a fresh conversation.
       if (existing.title === UNTITLED) {
         const title = deriveTitle(prompt);
-        repo.renameConversation(conversationId, user.id, title);
+        await repo.renameConversation(conversationId, user.id, title);
         send('title', { title });
       }
 
