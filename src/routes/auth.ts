@@ -34,6 +34,7 @@ export function createAuthRouter({ config, repo, auth, mailer, views }: AuthRout
     try {
       const raw = typeof req.body?.email === 'string' ? req.body.email : '';
       const email = normalizeEmail(raw);
+      const password = typeof req.body?.password === 'string' ? req.body.password : '';
 
       if (!EMAIL_PATTERN.test(email)) {
         res.status(400).type('html').send(views.loginPage({ error: 'Enter a valid email address.', email: raw }));
@@ -49,6 +50,45 @@ export function createAuthRouter({ config, repo, auth, mailer, views }: AuthRout
       }
 
       const user = await repo.findUserByEmail(email);
+
+      // A password was typed, so this is an admin sign-in attempt. It succeeds
+      // only for an admin with the right password, and every other outcome —
+      // unknown address, non-admin address, wrong password — gets the same
+      // message, so probing with a password reveals nothing but a correct hit.
+      if (password.length > 0) {
+        if (user?.isAdmin && auth.verifyAdminPassword(password)) {
+          await auth.startSession(res, user);
+          logger.info({ userId: user.id }, 'admin signed in with the password');
+          res.redirect('/');
+          return;
+        }
+        logger.warn({ email, ip: req.ip }, 'failed admin password attempt');
+        res
+          .status(401)
+          .type('html')
+          .send(views.loginPage({ error: 'That email address and password do not match.', email }));
+        return;
+      }
+
+      // No password: the magic-link path, for non-admins. An admin who leaves
+      // the field empty is told to fill it in rather than waiting for an email
+      // that will never arrive. That does tell a probe whether an address is an
+      // admin; the clarity is worth the one bit, and the rate limiter above
+      // covers the brute force it would otherwise invite.
+      if (user?.isAdmin) {
+        res
+          .status(400)
+          .type('html')
+          .send(
+            views.loginPage({
+              error: 'Administrators sign in with the password.',
+              email,
+              focusPassword: true,
+            }),
+          );
+        return;
+      }
+
       if (user) {
         const { token } = await auth.issueLoginToken(user);
         const link = `${config.appUrl}/auth/callback?token=${encodeURIComponent(token)}`;

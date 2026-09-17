@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 import type { NextFunction, Request, Response } from 'express';
 
@@ -39,6 +39,8 @@ function isApiRequest(req: Request): boolean {
 }
 
 export interface Auth {
+  /** Constant-time check of a submitted password against ADMIN_PASSWORD. */
+  verifyAdminPassword(password: string): boolean;
   issueLoginToken(user: User): Promise<{ token: string; expiresAt: Date }>;
   redeemLoginToken(token: string): Promise<User | null>;
   startSession(res: Response, user: User): Promise<void>;
@@ -55,7 +57,18 @@ export interface Auth {
 export function createAuth(config: Config, repo: Repo): Auth {
   const secureCookie = config.appUrl.startsWith('https://');
 
+  // Compared as digests, not as the raw strings: timingSafeEqual throws on a
+  // length mismatch, which would turn the comparison itself into a length
+  // oracle. A SHA-256 digest is always 32 bytes, whatever was typed.
+  const adminPasswordDigest = createHash('sha256').update(config.adminPassword).digest();
+
   const auth: Auth = {
+    verifyAdminPassword(password) {
+      if (typeof password !== 'string' || password.length === 0) return false;
+      const submitted = createHash('sha256').update(password).digest();
+      return timingSafeEqual(submitted, adminPasswordDigest);
+    },
+
     async issueLoginToken(user) {
       const token = generateToken();
       const expiresAt = minutesFromNow(config.loginTokenMinutes);
