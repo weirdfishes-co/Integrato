@@ -2,7 +2,14 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { closeAll, freshRepo } from './helpers/db.js';
 
-import { assistantPaths, isValidSlug, slugify, uniqueSlug, AssistantError } from '../src/assistants.js';
+import {
+  assistantPaths,
+  isValidSlug,
+  slugify,
+  uniqueSlug,
+  AssistantError,
+  RESERVED_SLUGS,
+} from '../src/assistants.js';
 import type { Config } from '../src/config.js';
 import type { Repo } from '../src/db/repo.js';
 
@@ -34,6 +41,23 @@ describe('uniqueSlug', () => {
 
   it('falls back to a generic name for an empty slug', async () => {
     expect(uniqueSlug('', () => false)).toBe('assistant');
+  });
+
+  /*
+   * An assistant lives at /<slug>, so a slug that matches a fixed route would
+   * leave it permanently unreachable behind that route.
+   */
+  it('never hands out a slug that a route already owns', async () => {
+    expect(uniqueSlug('admin', () => false)).toBe('admin-2');
+    expect(uniqueSlug('api', () => false)).toBe('api-2');
+    expect(uniqueSlug('login', () => false)).toBe('login-2');
+  });
+
+  it('treats every reserved word as unavailable', async () => {
+    for (const reserved of RESERVED_SLUGS) {
+      expect(uniqueSlug(reserved, () => false)).not.toBe(reserved);
+      expect(isValidSlug(reserved)).toBe(false);
+    }
   });
 });
 

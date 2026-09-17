@@ -164,8 +164,16 @@ context/*.md         knowledge base seeded into a brand-new assistant
   written to the log instead.
 - **One directory per assistant** under `ASSISTANTS_DIR`
   (`<slug>/instr.md`, `<slug>/context/*.md`). The slug is derived from the name
-  once, at creation, and never changes — it is both the URL (`/a/<slug>`) and
-  the directory name, so renaming an assistant must not move its files.
+  once, at creation, and never changes — it is both the URL (`/<slug>`) and the
+  directory name, so renaming an assistant must not move its files.
+- **An assistant lives at the root, `/<slug>`**, which makes its slug compete
+  with every fixed path. `RESERVED_SLUGS` in `assistants.ts` therefore refuses
+  `admin`, `api`, `login` and the rest: Express matches the fixed routes first,
+  so a clash would not break the app — it would silently make that assistant
+  unreachable, which is harder to notice. Adding a top-level route means adding
+  its path to that set. Static files cannot clash; they all contain a dot, which
+  the slug pattern rejects. `/a/<slug>` still answers, with a 301 to the new
+  shape, so older links keep working.
   `assistantPaths()` validates the slug *and* checks the resolved path against
   the root, the same defence `content.ts` applies to document names.
 - **Admins may use every assistant; everyone else needs a grant.** The

@@ -319,7 +319,7 @@ ${passwordField}
 ${assistants
   .map(
     (assistant) => `          <li>
-            <a class="picker__card" href="/a/${escapeHtml(assistant.slug)}">
+            <a class="picker__card" href="/${escapeHtml(assistant.slug)}">
               <span class="picker__name">${escapeHtml(assistant.name)}</span>
               ${
                 assistant.description.length > 0
@@ -377,9 +377,9 @@ ${cards}
               .map(
                 (assistant) => `          <tr>
             <td><a class="link" href="/admin/assistants/${assistant.id}">${escapeHtml(assistant.name)}</a></td>
-            <td class="muted small">/a/${escapeHtml(assistant.slug)}</td>
+            <td class="muted small">/${escapeHtml(assistant.slug)}</td>
             <td class="actions">
-              <a class="link small" href="/a/${escapeHtml(assistant.slug)}">Open</a>
+              <a class="link small" href="/${escapeHtml(assistant.slug)}">Open</a>
               <form method="post" action="/admin/assistants/${assistant.id}/delete"
                     onsubmit="return confirm('Delete ${escapeHtml(
                       assistant.name,
@@ -496,7 +496,7 @@ ${(options.effortLevels ?? [])
         <h1>${escapeHtml(assistant.name)}</h1>
         <div class="row">
           <a class="link" href="/admin/assistants/${assistant.id}/content">Knowledge base</a>
-          <a class="link" href="/a/${escapeHtml(assistant.slug)}">Open chat</a>
+          <a class="link" href="/${escapeHtml(assistant.slug)}">Open chat</a>
           <a class="link" href="/admin">← Admin</a>
         </div>
       </header>
@@ -518,7 +518,7 @@ ${(options.effortLevels ?? [])
             <label for="language">Answer language</label>
             <input id="language" name="language" type="text" required value="${escapeHtml(assistant.language)}">
           </div>
-          <p class="muted small">Address: <code>/a/${escapeHtml(assistant.slug)}</code> — fixed once created.</p>
+          <p class="muted small">Address: <code>/${escapeHtml(assistant.slug)}</code> — fixed once created.</p>
           <button type="submit">Save identity</button>
         </form>
       </section>

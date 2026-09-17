@@ -20,7 +20,7 @@ const els = {
 const assistantName = document.querySelector('.app')?.dataset.assistant || 'Assistant';
 /** Every API call is scoped to the assistant this page belongs to. */
 const assistantSlug = document.querySelector('.app')?.dataset.slug || '';
-const apiBase = `/api/a/${encodeURIComponent(assistantSlug)}`;
+const apiBase = `/api/${encodeURIComponent(assistantSlug)}`;
 
 const state = {
   conversations: [],

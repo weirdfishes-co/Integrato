@@ -77,27 +77,32 @@ export function createChatRouter({ config, repo, auth, chat, views }: ChatRouteD
     res.type('html').send(views.pickerPage(user, assistants));
   });
 
-  router.get('/a/:slug', auth.requireUser, async (req, res) => {
+  // Assistants used to live under /a/<slug>; keep old links working.
+  router.get('/a/:slug', (req, res) => {
+    res.redirect(301, `/${encodeURIComponent(String(req.params.slug ?? ''))}`);
+  });
+
+  router.get('/:slug', auth.requireUser, async (req, res) => {
     const assistant = await resolveAssistant(req, res);
     if (!assistant) return;
     const others = (await repo.listAssistantsForUser(req.user!.id, req.user!.isAdmin)).length;
     res.type('html').send(views.chatPage(req.user!, assistant, others > 1));
   });
 
-  router.get('/api/a/:slug/conversations', auth.requireUser, async (req, res) => {
+  router.get('/api/:slug/conversations', auth.requireUser, async (req, res) => {
     const assistant = await resolveAssistant(req, res);
     if (!assistant) return;
     res.json({ conversations: await repo.listConversations(req.user!.id, assistant.id) });
   });
 
-  router.post('/api/a/:slug/conversations', auth.requireUser, async (req, res) => {
+  router.post('/api/:slug/conversations', auth.requireUser, async (req, res) => {
     const assistant = await resolveAssistant(req, res);
     if (!assistant) return;
     const conversation = await repo.createConversation(req.user!.id, assistant.id, UNTITLED);
     res.status(201).json({ conversation, messages: [] });
   });
 
-  router.get('/api/a/:slug/conversations/:id', auth.requireUser, async (req, res) => {
+  router.get('/api/:slug/conversations/:id', auth.requireUser, async (req, res) => {
     const assistant = await resolveAssistant(req, res);
     if (!assistant) return;
     const id = parseId(req.params.id);
@@ -109,7 +114,7 @@ export function createChatRouter({ config, repo, auth, chat, views }: ChatRouteD
     res.json({ conversation, messages: await repo.listMessages(conversation.id) });
   });
 
-  router.delete('/api/a/:slug/conversations/:id', auth.requireUser, async (req, res) => {
+  router.delete('/api/:slug/conversations/:id', auth.requireUser, async (req, res) => {
     const assistant = await resolveAssistant(req, res);
     if (!assistant) return;
     const id = parseId(req.params.id);
@@ -129,7 +134,7 @@ export function createChatRouter({ config, repo, auth, chat, views }: ChatRouteD
    * Both the question and the complete answer are stored, so the history is
    * intact after signing in again.
    */
-  router.post('/api/a/:slug/conversations/:id/messages', auth.requireUser, async (req, res, next) => {
+  router.post('/api/:slug/conversations/:id/messages', auth.requireUser, async (req, res, next) => {
     const user = req.user!;
     const assistant = await resolveAssistant(req, res);
     if (!assistant) return;

@@ -74,7 +74,10 @@ npm test            # vitest
 
 An admin creates assistants on **`/admin`**. Each one gets:
 
-- its own **address**, `/a/<slug>`, derived from the name when it is created
+- its own **address**, `/<slug>`, derived from the name when it is created.
+  Names that would collide with a built-in path (`admin`, `api`, `login`, …)
+  get a numbered slug instead, so the assistant stays reachable. The old
+  `/a/<slug>` form redirects to the new one
 - its own **instructions and knowledge base**, under
   `<ASSISTANTS_DIR>/<slug>/instr.md` and `<ASSISTANTS_DIR>/<slug>/context/*.md`
 - its own **model, effort, web search, memory, citations and compaction**

@@ -17,6 +17,28 @@ import { logger } from './logger.js';
  */
 
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,48}[a-z0-9]$|^[a-z0-9]$/;
+
+/**
+ * Slugs an assistant may not take, because an assistant lives at the root
+ * (`/<slug>`) and these paths are already spoken for. Express matches the fixed
+ * routes first, so a clash would not break the app — it would quietly make that
+ * assistant unreachable, which is worse than refusing the name up front.
+ *
+ * Static files cannot clash: they all contain a dot, which SLUG_PATTERN rejects.
+ */
+export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
+  'a',
+  'admin',
+  'api',
+  'assets',
+  'auth',
+  'favicon',
+  'healthz',
+  'login',
+  'logout',
+  'public',
+  'static',
+]);
 export const MAX_NAME_LENGTH = 80;
 export const MAX_DESCRIPTION_LENGTH = 200;
 
@@ -35,19 +57,21 @@ export function slugify(name: string): string {
   return slug;
 }
 
-/** Appends -2, -3, … until the slug is free. */
+/** Appends -2, -3, … until the slug is both free and not reserved. */
 export function uniqueSlug(base: string, taken: (slug: string) => boolean): string {
   const seed = base.length > 0 ? base : 'assistant';
-  if (!taken(seed)) return seed;
+  const unavailable = (slug: string): boolean => RESERVED_SLUGS.has(slug) || taken(slug);
+
+  if (!unavailable(seed)) return seed;
   for (let suffix = 2; suffix < 1000; suffix += 1) {
     const candidate = `${seed.slice(0, 46)}-${suffix}`;
-    if (!taken(candidate)) return candidate;
+    if (!unavailable(candidate)) return candidate;
   }
   throw new AssistantError('Could not find a free slug for this name');
 }
 
 export function isValidSlug(slug: string): boolean {
-  return SLUG_PATTERN.test(slug);
+  return SLUG_PATTERN.test(slug) && !RESERVED_SLUGS.has(slug);
 }
 
 /**
