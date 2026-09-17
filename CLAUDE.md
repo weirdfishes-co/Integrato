@@ -26,7 +26,7 @@ web-only (see Decisions).
 
 ## Stack
 
-Node 22 · TypeScript (ESM) · Express 5 · PostgreSQL (`pg`) · nodemailer · pino ·
+Node 22 · TypeScript (ESM) · Express 5 · PostgreSQL (`pg`) · pino ·
 `openai` (pointed at OpenRouter) · vanilla JS and hand-written CSS on the front end.
 Hosted on Railway via a multi-stage Dockerfile, with Postgres as a separate service.
 
@@ -47,7 +47,7 @@ src/
   compaction.ts      summarizes old turns once a conversation gets long
   content.ts         read/write the knowledge base + path validation + seeding
   context.ts         builds the system prompt from instr.md + context/*.md
-  mail.ts            magic-link delivery: Brevo HTTP API, SMTP, or the log
+  mail.ts            magic-link delivery over Brevo's HTTP API, or the log
   logger.ts          pino instance shared by every module
   rate-limit.ts      in-memory limiter for the login form
   views.ts           server-side HTML (everything through escapeHtml)
@@ -138,12 +138,14 @@ context/*.md         knowledge base seeded into a brand-new assistant
   The knowledge base is the cached prefix shared by every user; putting a
   per-user block in front of it would invalidate the cache for everyone on every
   request.
-- **Mail over Brevo's HTTP API, not SMTP.** Railway could open no TCP connection
-  to Brevo's SMTP port — `Connection timeout` at the `CONN` stage on 587, 2525
-  and 465 alike, before any credential was exchanged, while the identical
-  configuration worked from a laptop. Port 443 has no such problem. `mail.ts`
-  picks the transport: `BREVO_API_KEY` first, then `SMTP_HOST`, then the log
-  (non-production only). SMTP is kept because it works fine locally.
+- **Mail over Brevo's HTTP API, and nothing else.** Railway could open no TCP
+  connection to Brevo's SMTP port — `Connection timeout` at the `CONN` stage on
+  587, 2525 and 465 alike, before any credential was exchanged, while the
+  identical configuration worked from a laptop. Port 443 has no such problem.
+  SMTP was kept for a while as a local-development fallback and then removed: a
+  second transport that only works in one environment is a second way to fail,
+  and `nodemailer` went with it. Without a key, outside production, the link is
+  written to the log instead.
 - **One directory per assistant** under `ASSISTANTS_DIR`
   (`<slug>/instr.md`, `<slug>/context/*.md`). The slug is derived from the name
   once, at creation, and never changes — it is both the URL (`/a/<slug>`) and
@@ -245,16 +247,13 @@ context/*.md         knowledge base seeded into a brand-new assistant
 - `MODEL_MAX_TOKENS` is validated by OpenRouter against your *remaining credit*,
   not just against the model: a value your balance cannot cover fails the whole
   request with a 402 before the model runs.
-- **Mail goes over Brevo's HTTP API when `BREVO_API_KEY` is set**, and only
-  falls back to SMTP otherwise (`mail.ts` picks the transport). Railway could
-  open no TCP connection to Brevo's SMTP port — `Connection timeout` at `CONN`,
-  before any credential was exchanged, while the identical config worked from a
-  laptop. Port 443 has no such problem. Both transports share
-  `buildMagicLinkEmail()`, so the email itself only exists once.
-- **SMTP has explicit timeouts** (`mail.ts`). Nodemailer waits on the OS
-  otherwise, so a blocked outbound port leaves `POST /login` hanging for minutes
-  with no response — the user sees an endless spinner rather than an error. The
-  timeouts turn that into a 502 with a readable message in ten seconds.
+- **`MAIL_FROM` is not an SMTP setting** and survived the removal: it is parsed
+  into Brevo's `sender` object, and the address must be one Brevo has verified.
+  Left unset it becomes `noreply@localhost`, which Brevo rejects.
+- **The Brevo call has a 15-second timeout.** `fetch` has none by default, and a
+  hanging send leaves `POST /login` with no response — the user sees an endless
+  spinner rather than an error. This is the same failure SMTP used to produce
+  when its port was blocked.
 - **Never set `ASSISTANTS_DIR` to a relative path in a deployed environment.**
   The image points it at `/data`; a value copied from `.env` such as
   `./data/assistants` resolves inside `/app`, which the `node` user cannot

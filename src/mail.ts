@@ -1,35 +1,26 @@
-import nodemailer, { type Transporter } from 'nodemailer';
-
 import type { Config } from './config.js';
 import { logger } from './logger.js';
 
 /**
- * Delivery of the sign-in link. Three transports, picked in this order:
+ * Delivery of the sign-in link through Brevo's HTTP API.
  *
- *  1. Brevo's HTTP API when BREVO_API_KEY is set. Preferred on a hosting
- *     platform: it runs over 443, which nothing blocks, while outbound SMTP
- *     ports are regularly dropped by the host or the mail provider.
- *  2. SMTP when SMTP_HOST is set. Fine locally and on hosts that allow it.
- *  3. The log, outside production only, so you can sign in without a mail
- *     server at all.
+ * SMTP was removed: Railway could open no TCP connection to Brevo's SMTP port
+ * on 587, 2525 or 465 — a connection timeout before any credential was
+ * exchanged — while the same configuration worked from a laptop. Port 443 has
+ * no such problem, so keeping a second transport only kept a second way to
+ * fail.
+ *
+ * Without a key, and outside production, the link goes to the log instead so
+ * you can sign in with no mail account at all.
  */
 
 export interface Mailer {
   sendMagicLink(to: string, link: string, minutesValid: number): Promise<void>;
 }
 
+// Brevo's own path for transactional mail; nothing here speaks SMTP.
 const BREVO_URL = 'https://api.brevo.com/v3/smtp/email';
 const BREVO_TIMEOUT_MS = 15_000;
-
-/**
- * Without these, a blocked outbound SMTP port (a common hosting default) leaves
- * the send hanging until the OS gives up — minutes during which the sign-in
- * request never answers and the user just watches a spinner. Failing fast turns
- * that into a visible "could not send" message instead.
- */
-const CONNECTION_TIMEOUT_MS = 10_000;
-const GREETING_TIMEOUT_MS = 10_000;
-const SOCKET_TIMEOUT_MS = 20_000;
 
 function escapeHtml(value: string): string {
   return value
@@ -60,7 +51,7 @@ interface Message {
   text: string;
 }
 
-/** The email itself, shared by every transport. */
+/** The email itself; exported so tests can check it without sending. */
 export function buildMagicLinkEmail(appName: string, link: string, minutesValid: number): Message {
   const safeLink = escapeHtml(link);
   const safeName = escapeHtml(appName);
@@ -138,49 +129,13 @@ function createBrevoMailer(config: Config, apiKey: string): Mailer {
   };
 }
 
-function createSmtpMailer(config: Config, host: string): Mailer {
-  const appName = config.assistantName;
-
-  const transporter: Transporter = nodemailer.createTransport({
-    host,
-    port: config.mail.port,
-    secure: config.mail.secure,
-    auth: config.mail.user ? { user: config.mail.user, pass: config.mail.pass } : undefined,
-    connectionTimeout: CONNECTION_TIMEOUT_MS,
-    greetingTimeout: GREETING_TIMEOUT_MS,
-    socketTimeout: SOCKET_TIMEOUT_MS,
-  });
-
-  if (!config.mail.user) {
-    logger.warn({ host }, 'SMTP_USER is empty — connecting to the relay without authentication');
-  }
-
-  return {
-    async sendMagicLink(to, link, minutesValid) {
-      const message = buildMagicLinkEmail(appName, link, minutesValid);
-      await transporter.sendMail({
-        from: config.mail.from,
-        to,
-        subject: message.subject,
-        text: message.text,
-        html: message.html,
-      });
-      logger.info({ to }, 'magic link sent');
-    },
-  };
-}
-
 export function createMailer(config: Config): Mailer {
   if (config.mail.brevoApiKey) {
     logger.info('sending sign-in links through the Brevo HTTP API');
     return createBrevoMailer(config, config.mail.brevoApiKey);
   }
 
-  if (config.mail.host) {
-    return createSmtpMailer(config, config.mail.host);
-  }
-
-  logger.warn('no BREVO_API_KEY or SMTP_HOST — sign-in links are written to the log instead of emailed');
+  logger.warn('no BREVO_API_KEY — sign-in links are written to the log instead of emailed');
   return {
     async sendMagicLink(to, link) {
       logger.info({ to, link }, 'SIGN-IN LINK (dev mode, not emailed)');

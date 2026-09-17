@@ -88,16 +88,10 @@ export interface Config {
   readonly loginTokenMinutes: number;
   readonly mail: {
     /**
-     * Brevo's HTTP API key. When set it is used instead of SMTP — hosting
-     * platforms and mail providers block SMTP ports far more often than 443.
+     * Brevo's HTTP API key, and the only way the app sends mail. Empty outside
+     * production: the magic link is then written to the log instead.
      */
     readonly brevoApiKey: string | undefined;
-    /** Empty outside production: the magic link is then written to the log. */
-    readonly host: string | undefined;
-    readonly port: number;
-    readonly secure: boolean;
-    readonly user: string | undefined;
-    readonly pass: string | undefined;
     readonly from: string;
   };
 }
@@ -113,13 +107,11 @@ export function loadConfig(env: Env = process.env): Config {
     throw new Error('Set ADMIN_EMAILS to at least one email address allowed to manage the user list');
   }
 
-  // A way to send mail is mandatory in production — a login link must never end
-  // up in a log file there. Either transport satisfies that; locally both may be
-  // missing, so you can start without a mail server.
+  // Mandatory in production — a sign-in link must never end up in a log file
+  // there. Locally it may be missing, so you can start without a mail account.
   const brevoApiKey = env.BREVO_API_KEY?.trim() || undefined;
-  const smtpHost = env.SMTP_HOST?.trim() || undefined;
-  if (isProduction && !brevoApiKey && !smtpHost) {
-    throw new Error('Set BREVO_API_KEY or SMTP_HOST so sign-in links can be emailed');
+  if (isProduction && !brevoApiKey) {
+    throw new Error('Set BREVO_API_KEY so sign-in links can be emailed');
   }
 
   return {
@@ -143,11 +135,6 @@ export function loadConfig(env: Env = process.env): Config {
     loginTokenMinutes: integer(env, 'LOGIN_TOKEN_MINUTES', 30),
     mail: {
       brevoApiKey,
-      host: smtpHost,
-      port: integer(env, 'SMTP_PORT', 587),
-      secure: boolean(env, 'SMTP_SECURE', integer(env, 'SMTP_PORT', 587) === 465),
-      user: env.SMTP_USER?.trim() || undefined,
-      pass: env.SMTP_PASS?.trim() || undefined,
       from: optional(env, 'MAIL_FROM', `${assistantName} <noreply@localhost>`),
     },
   };

@@ -7,7 +7,7 @@ to, and their conversations are kept per assistant in PostgreSQL.
 
 - **Stack**: Node 22, TypeScript, Express 5, PostgreSQL
 - **Model access**: OpenRouter (OpenAI-compatible API), one key for every model
-- **Email**: Brevo HTTP API, with SMTP as an alternative
+- **Email**: Brevo HTTP API
 - **Hosting**: Railway (Dockerfile + a Postgres service + a volume for the knowledge bases)
 - **Auth**: magic link over email, 30-day cookie session
 - **Admin**: `/admin` for users, assistants and the OpenRouter balance;
@@ -38,24 +38,23 @@ user list as admins on every boot, so you can always get in.
 runs the real migrations against it, so a mistake in the SQL fails in the suite
 rather than in production.
 
-**Sending mail.** Set `BREVO_API_KEY` to send over Brevo's HTTP API, or
-`SMTP_HOST` (plus `SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`) to send over SMTP. The API
-key wins when both are set — the `SMTP_*` variables are then never read and can
-be removed. `MAIL_FROM` is **not** SMTP-only: both transports use it, so it must
-stay. Prefer the API key on a hosting platform: it runs
+**Sending mail.** Set `BREVO_API_KEY` and `MAIL_FROM`. Brevo's HTTP API is the
+only transport: SMTP was removed after Railway proved unable to open a
+connection to Brevo's SMTP port on 587, 2525 or 465, while port 443 worked
+without trouble. Get a key from Brevo → SMTP & API → API Keys. Prefer the API key on a hosting platform: it runs
 over 443, while outbound SMTP ports are often blocked — by the host or by the
 mail provider — which surfaces as `Connection timeout` and no email.
 
-**Signing in without a mail server.** Leave both empty and the sign-in link is
-written to the log instead of emailed:
+**Signing in without a mail account.** Leave `BREVO_API_KEY` empty and the
+sign-in link is written to the log instead of emailed:
 
 ```
 SIGN-IN LINK (dev mode, not emailed)  link: http://localhost:3000/auth/callback?token=...
 ```
 
 Paste that URL into your browser and you are in. This only works outside
-production: with `NODE_ENV=production` one of `BREVO_API_KEY` or `SMTP_HOST` is
-required, so a sign-in link can never end up in a log file there.
+production: with `NODE_ENV=production` `BREVO_API_KEY` is required, so a sign-in
+link can never end up in a log file there.
 
 Other scripts:
 
@@ -262,11 +261,8 @@ which the `Retry-After` header times.
    | `DATABASE_URL` | yes | PostgreSQL connection string; Railway's Postgres service supplies it |
    | `OPENROUTER_API_KEY` | yes | API key from [openrouter.ai/keys](https://openrouter.ai/keys) |
    | `ADMIN_EMAILS` | yes | Comma-separated admins; always granted rights at boot |
-   | `BREVO_API_KEY` | yes* | Brevo HTTP API key — the reliable option on Railway |
-   | `SMTP_HOST` | yes* | SMTP server, if you send over SMTP instead |
-   | `SMTP_PORT` / `SMTP_SECURE` | no | Default 587 with STARTTLS; `SMTP_SECURE=true` for port 465 |
-   | `SMTP_USER` / `SMTP_PASS` | no | Leave empty for a relay without authentication |
-   | `MAIL_FROM` | no | Sender, e.g. `AI Assistant <noreply@yourdomain.com>` |
+   | `BREVO_API_KEY` | yes | Brevo HTTP API key; the only way the app sends mail |
+   | `MAIL_FROM` | no | Sender, e.g. `AI Assistant <noreply@yourdomain.com>`. Must be a sender Brevo has verified |
    | `ASSISTANT_NAME` | no | Name of the *first* assistant on a fresh install, and the sign-in email's sender name |
    | `ASSISTANT_LANGUAGE` | no | Answer language of the first assistant; each assistant carries its own afterwards |
    | `APP_URL` | yes | Public URL, e.g. `https://assistant.up.railway.app`. Magic links are built on this; `https://` sets the Secure flag on the cookie |
@@ -276,10 +272,6 @@ which the `Retry-After` header times.
    | `OPENROUTER_SITE_URL` / `OPENROUTER_SITE_NAME` | no | Optional attribution on the openrouter.ai rankings |
    | `SESSION_DAYS` / `LOGIN_TOKEN_MINUTES` | no | Default 30 days and 30 minutes |
    | `LOG_LEVEL` | no | pino level, default `info` |
-
-   \* One of `BREVO_API_KEY` or `SMTP_HOST` is required in production. Prefer the
-   API key: Railway could not open a TCP connection to Brevo's SMTP port on 587,
-   2525 or 465, which surfaced as `Connection timeout` and no email.
 
    Railway sets `PORT` itself; the server binds on `0.0.0.0`. Do not set
    `ASSISTANTS_DIR` to a relative path — the image already points it at the

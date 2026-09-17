@@ -109,7 +109,7 @@ describe('loadConfig', () => {
     DATABASE_URL: 'postgres://localhost/test',
     OPENROUTER_API_KEY: 'sk-or-test',
     ADMIN_EMAILS: 'Boss@Example.COM, second@example.com',
-    SMTP_HOST: 'smtp.example.com',
+    BREVO_API_KEY: 'xkeysib-test',
   };
 
   it('normalizes and splits the admin list', async () => {
@@ -129,14 +129,16 @@ describe('loadConfig', () => {
     expect(() => loadConfig(rest as NodeJS.ProcessEnv)).toThrow(/ADMIN_EMAILS/);
   });
 
-  it('allows a missing SMTP_HOST outside production', async () => {
-    const { SMTP_HOST: _omitted, ...rest } = base;
-    expect(loadConfig(rest as NodeJS.ProcessEnv).mail.host).toBeUndefined();
+  it('allows a missing BREVO_API_KEY outside production, so the link goes to the log', async () => {
+    const { BREVO_API_KEY: _omitted, ...rest } = base;
+    expect(loadConfig(rest as NodeJS.ProcessEnv).mail.brevoApiKey).toBeUndefined();
   });
 
-  it('requires SMTP_HOST in production, so sign-in links never end up in the log', async () => {
-    const { SMTP_HOST: _omitted, ...rest } = base;
-    expect(() => loadConfig({ ...rest, NODE_ENV: 'production' } as NodeJS.ProcessEnv)).toThrow(/SMTP_HOST/);
+  it('requires BREVO_API_KEY in production, so sign-in links never end up in the log', async () => {
+    const { BREVO_API_KEY: _omitted, ...rest } = base;
+    expect(() => loadConfig({ ...rest, NODE_ENV: 'production' } as NodeJS.ProcessEnv)).toThrow(
+      /BREVO_API_KEY/,
+    );
   });
 
   it('rejects an unknown effort level', async () => {
