@@ -1,49 +1,105 @@
 /*
- * Calm white/grey interface. All colours come from custom properties, with a
- * dark variant via prefers-color-scheme. Fonts come from the system — no
- * external requests, works offline.
+ * Nyenrode Business University styling — see STYLEGUIDE.md.
+ *
+ * Every colour, size and radius below is a value from that document; the
+ * semantic layer (--bg, --text, …) maps the brand palette onto the app's
+ * surfaces so the components keep their existing class names.
+ *
+ * Two places go beyond the styleguide, which only describes a light site:
+ *  - the dark variant, built from the same palette (dark-blue grounds, the
+ *    yellow secondary as the accent, since primary is invisible on dark);
+ *  - the sidebar collapse, which stays at 720px. The styleguide branches
+ *    layout at xl (1280px) for the marketing nav; a chat sidebar that folded
+ *    away on a 1200px desktop would be a regression, so xl is used for reading
+ *    width and heading promotion only.
  */
 
 :root {
-  --bg: #ffffff;
-  --bg-subtle: #f7f7f8;
-  --bg-raised: #ffffff;
-  --border: #e4e4e7;
-  --border-strong: #d4d4d8;
-  --text: #18181b;
-  --text-muted: #71717a;
-  --accent: #18181b;
-  --accent-text: #ffffff;
-  --bubble-user: #f1f1f3;
-  --danger: #b42318;
+  /* ---- brand palette (STYLEGUIDE §1) ---- */
+  --primary: #355071;
+  --primary-600: #2a405a;
+  --primary-900: #203044;
+  --secondary: #fbba20;
+  --secondary-600: #c9951a;
+  --light-blue: #0462b6;
+  --light-blue-600: #034e92;
+  --red: #e4032c;
+  --red-600: #b60223;
+  --bordeaux: #7a103e;
+  --bordeaux-600: #620d32;
+  --green: #7abf3a;
+  --green-600: #62992e;
+  --gray: #eceef2;
+  --gray-600: #bdbec2;
+  --gray-800: #5e5f61;
 
-  --radius: 10px;
-  --radius-lg: 14px;
+  /* ---- semantic surfaces ---- */
+  --bg: #ffffff;
+  --bg-subtle: var(--gray);
+  --bg-raised: #ffffff;
+  --border: var(--gray);
+  --border-strong: var(--gray-600);
+  --text: #000000;
+  --text-muted: var(--gray-800);
+  --heading: var(--primary);
+  --accent: var(--primary);
+  --accent-hover: var(--primary-600);
+  --accent-text: #ffffff;
+  --bubble-user: var(--gray);
+  --danger: var(--red);
+  --danger-hover: var(--red-600);
+  /* Red as a text colour: red-600 on white clears AA, where red-500 does not. */
+  --danger-text: var(--red-600);
+  --focus: var(--primary);
+  --link: var(--primary);
+
+  /* ---- geometry (STYLEGUIDE §4) ---- */
+  --radius: 0;          /* buttons and inputs are square-cornered */
+  --radius-card: 0.5rem;   /* rounded-lg */
+  --radius-md: 0.375rem;
+  --shadow: 0 4px 6px -1px #0000001a, 0 2px 4px -2px #0000001a;
+
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
-  --space-4: 16px;
+  --space-4: 16px;   /* sf sm */
   --space-5: 24px;
-  --space-6: 32px;
+  --space-6: 32px;   /* sf md */
+  --space-7: 64px;   /* sf lg */
 
-  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  /* ---- type (STYLEGUIDE §2) ---- */
+  --font-heading: 'Noto Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+  --font: 'Open Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
-  --sidebar-width: 260px;
+
+  --transition: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  --sidebar-width: 280px;
 }
 
+/*
+ * Derived from the same palette: dark-blue grounds, yellow as the accent with
+ * dark-blue text on it — the pairing the styleguide prescribes for secondary.
+ */
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #131316;
-    --bg-subtle: #1a1a1e;
-    --bg-raised: #1f1f24;
-    --border: #2c2c32;
-    --border-strong: #3a3a42;
-    --text: #ececf1;
-    --text-muted: #9b9ba4;
-    --accent: #ececf1;
-    --accent-text: #131316;
-    --bubble-user: #26262c;
-    --danger: #f87171;
+    --bg: var(--primary-900);
+    --bg-subtle: var(--primary-600);
+    --bg-raised: var(--primary-600);
+    --border: var(--primary);
+    --border-strong: var(--gray-800);
+    --text: #ffffff;
+    --text-muted: var(--gray-600);
+    --heading: #ffffff;
+    --accent: var(--secondary);
+    --accent-hover: var(--secondary-600);
+    --accent-text: var(--primary-900);
+    --bubble-user: var(--primary);
+    /* Brand red on the navy ground is 1.4:1; lightened it clears 4:1. Solid red
+       buttons keep the brand value, since they carry white text on red. */
+    --danger-text: #f18195;
+    --focus: var(--secondary);
+    --link: #ffffff;
+    --shadow: 0 4px 6px -1px #00000040, 0 2px 4px -2px #00000040;
   }
 }
 
@@ -61,8 +117,8 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
-  font-size: 15px;
-  line-height: 1.6;
+  font-size: 1rem;
+  line-height: 1.5rem;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -73,11 +129,33 @@ body.centered {
   background: var(--bg-subtle);
 }
 
-h1 {
-  font-size: 1.25rem;
+/* ---------- headings (STYLEGUIDE §2) ---------- */
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-heading);
   font-weight: 600;
-  margin: 0 0 var(--space-3);
-  letter-spacing: -0.01em;
+  color: var(--heading);
+  margin: 0 0 1rem;
+}
+
+/* heading2, promoted to heading1 at xl — never an ad-hoc size. */
+h1 {
+  font-size: 1.875rem;
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: 1.5rem;
+  line-height: 2rem;
+}
+
+h3 {
+  font-size: 1.25rem;
 }
 
 .muted {
@@ -85,7 +163,8 @@ h1 {
 }
 
 .small {
-  font-size: 0.85rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
 }
 
 .visually-hidden {
@@ -97,10 +176,17 @@ h1 {
   white-space: nowrap;
 }
 
+a {
+  color: var(--link);
+}
+
 /* ---------- forms ---------- */
 
 input[type='email'],
 input[type='text'],
+input[type='password'],
+input[type='number'],
+select,
 textarea {
   width: 100%;
   font: inherit;
@@ -108,30 +194,58 @@ textarea {
   background: var(--bg-raised);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
-  padding: 10px 12px;
+  padding: 0.625rem 0.75rem;
+  transition: border-color var(--transition);
 }
 
+input:hover:not(:disabled),
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+/* §6: outline, 2px, offset 2px, primary — never removed, never unstyled. */
 input:focus-visible,
+select:focus-visible,
 textarea:focus-visible,
 button:focus-visible,
-a:focus-visible {
-  outline: 2px solid var(--text);
+a:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 
+/* ---------- buttons (STYLEGUIDE §3) ---------- */
+
+/*
+ * The .btn base, applied to every <button> directly: square-cornered,
+ * uppercase, bold, always a 1px border so solid and outline share one box.
+ */
 button {
-  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  column-gap: 0.5rem;
+  white-space: nowrap;
+  font-family: var(--font);
+  font-size: 1rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  text-align: center;
+  text-decoration: none;
   cursor: pointer;
   border: 1px solid transparent;
   border-radius: var(--radius);
-  padding: 10px 16px;
+  padding: 0.625rem 1rem;
   background: var(--accent);
   color: var(--accent-text);
-  font-weight: 500;
+  transition: all var(--transition);
 }
 
-button:hover:not(:disabled) {
-  opacity: 0.88;
+button:hover:not(:disabled),
+button:focus:not(:disabled) {
+  background: var(--accent-hover);
+  color: var(--accent-text);
 }
 
 button:disabled {
@@ -139,47 +253,112 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* Secondary CTA: yellow with dark-blue text, darkening together on hover. */
+button.secondary {
+  background: var(--secondary);
+  color: var(--primary);
+  border-color: var(--secondary);
+}
+
+button.secondary:hover:not(:disabled),
+button.secondary:focus:not(:disabled) {
+  background: var(--secondary-600);
+  color: var(--primary-900);
+  border-color: var(--secondary-600);
+}
+
+/* btn-red, for the destructive solid buttons. */
+button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #ffffff;
+}
+
+button.danger:hover:not(:disabled),
+button.danger:focus:not(:disabled) {
+  background: var(--danger-hover);
+  border-color: var(--danger-hover);
+  color: #ffffff;
+}
+
+/* Text links, whether they are <a> or a <button> inside a form. */
 button.link,
 a.link {
+  display: inline;
   background: none;
   border: none;
   padding: 0;
-  color: var(--text-muted);
+  color: var(--link);
   text-decoration: underline;
+  text-transform: none;
   font-weight: 400;
+  font-size: inherit;
 }
 
 button.link:hover,
+button.link:focus,
 a.link:hover {
-  color: var(--text);
-}
-
-button.danger {
-  color: var(--danger);
-}
-
-.icon-button {
   background: none;
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-  padding: 4px 10px;
-  line-height: 1.4;
+  color: var(--accent-hover);
+  text-decoration: underline;
 }
 
-.icon-button:hover {
-  color: var(--text);
-  background: var(--bg-subtle);
+button.link.danger,
+a.link.danger {
+  background: none;
+  border: none;
+  color: var(--danger-text);
+}
+
+button.link.danger:hover,
+button.link.danger:focus {
+  background: none;
+  color: var(--danger-text);
+  text-decoration: underline;
+}
+
+/* btn-tertiary / btn-gray, at btn-sm size. */
+.icon-button {
+  background: var(--gray);
+  color: var(--primary);
+  border: 1px solid var(--gray);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.icon-button:hover,
+.icon-button:focus {
+  background: var(--gray-600);
+  border-color: var(--gray-600);
+  color: var(--primary);
 }
 
 .stack {
   display: grid;
+  gap: var(--space-3);
+}
+
+/* A label, its control and an optional hint, stacked as one unit. */
+.field {
+  display: flex;
+  flex-direction: column;
   gap: var(--space-2);
+}
+
+.field > label {
+  font-weight: 600;
+  color: var(--heading);
+}
+
+.field .muted {
+  margin: 0;
 }
 
 .row {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-4);
   flex-wrap: wrap;
 }
 
@@ -195,42 +374,59 @@ button.danger {
 .checkbox {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
-  color: var(--text-muted);
-  font-size: 0.9rem;
+  gap: var(--space-2);
+  color: var(--text);
+  font-size: 1rem;
 }
 
-/* ---------- cards & notices ---------- */
+.checkbox input {
+  width: auto;
+  accent-color: var(--accent);
+}
+
+/* ---------- cards & notices (STYLEGUIDE §5) ---------- */
 
 .card {
   width: 100%;
-  max-width: 380px;
+  max-width: 420px;
   background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow);
   padding: var(--space-6);
 }
 
+.card h1 {
+  margin-bottom: var(--space-4);
+}
+
 .notice {
-  border-radius: var(--radius);
-  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
   margin: 0 0 var(--space-4);
-  font-size: 0.9rem;
-  border: 1px solid var(--border);
+  font-size: 1rem;
+  border-left: 4px solid var(--green);
   background: var(--bg-subtle);
+  color: var(--text);
 }
 
 .notice--error {
-  border-color: var(--danger);
-  color: var(--danger);
+  border-left-color: var(--red);
+  color: var(--danger-text);
 }
 
-/* ---------- admin page ---------- */
+/* ---------- page shell ---------- */
 
 .page {
-  max-width: 780px;
+  max-width: 1024px;
   margin: 0 auto;
   padding: var(--space-6) var(--space-4);
+}
+
+@media (min-width: 1280px) {
+  .page {
+    max-width: 1280px;
+    padding: var(--space-7) var(--space-6);
+  }
 }
 
 .page__head {
@@ -238,13 +434,15 @@ button.danger {
   justify-content: space-between;
   align-items: baseline;
   gap: var(--space-4);
-  margin-bottom: var(--space-5);
+  margin-bottom: var(--space-6);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border-strong);
 }
 
 .table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.92rem;
+  font-size: 1rem;
 }
 
 .table th,
@@ -256,57 +454,81 @@ button.danger {
 }
 
 .table th {
-  color: var(--text-muted);
-  font-weight: 500;
-  font-size: 0.82rem;
+  color: var(--primary);
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  border-bottom-color: var(--border-strong);
 }
 
+@media (prefers-color-scheme: dark) {
+  .table th {
+    color: var(--text);
+  }
+}
+
+/* A cell may hold several actions (a link plus a delete form); keep them on one
+   line instead of letting the block-level form drop below. Laid out with inline
+   children rather than `display: flex`, which takes the cell out of the table
+   box and leaves its bottom border drawn only under the flex area. */
 .table td.actions {
   text-align: right;
-}
-
-/* A cell may hold several actions (a link plus a delete form); keep them on
-   one line instead of letting the block-level form drop below. */
-.table td.actions {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  justify-content: flex-end;
+  white-space: nowrap;
 }
 
 .table td.actions form {
   display: inline;
 }
 
-.table code {
+.table td.actions > * + * {
+  margin-left: 0.75rem;
+}
+
+.table code,
+code {
   font-family: var(--font-mono);
   font-size: 0.85em;
-  color: var(--text-muted);
-  background: var(--bg-subtle);
+  color: var(--primary);
+  background: var(--gray);
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
+}
+
+@media (prefers-color-scheme: dark) {
+  .table code,
+  code {
+    color: var(--text);
+    background: var(--primary);
+  }
 }
 
 /* ---------- knowledge base ---------- */
 
 .panel {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: var(--space-4) var(--space-5);
-  margin-bottom: var(--space-5);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow);
+  padding: var(--space-5) var(--space-6);
+  margin-bottom: var(--space-6);
   background: var(--bg-raised);
 }
 
+/* heading5 */
 .panel h2 {
-  font-size: 0.95rem;
-  font-weight: 600;
-  margin: 0 0 var(--space-1);
+  font-size: 1.125rem;
+  line-height: 1.75rem;
+  margin: 0 0 var(--space-2);
 }
 
 .panel .table {
-  margin-top: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.panel .table + .row--form,
+.panel .table + form {
+  margin-top: var(--space-5);
 }
 
 .row--between {
@@ -322,14 +544,14 @@ button.danger {
 input[type='file'] {
   font: inherit;
   color: var(--text-muted);
-  font-size: 0.9rem;
+  font-size: 0.875rem;
 }
 
 .editor {
   width: 100%;
   min-height: 60vh;
   font-family: var(--font-mono);
-  font-size: 0.88rem;
+  font-size: 0.875rem;
   line-height: 1.6;
   resize: vertical;
   tab-size: 2;
@@ -346,23 +568,71 @@ input[type='file'] {
 .sidebar {
   display: flex;
   flex-direction: column;
-  background: var(--bg-subtle);
-  border-right: 1px solid var(--border);
+  background: var(--primary);
+  color: #ffffff;
   min-height: 0;
   padding-bottom: env(safe-area-inset-bottom);
+}
+
+.sidebar a,
+.sidebar .muted,
+.sidebar button.link {
+  color: #ffffff;
+}
+
+/*
+ * The shared link styles hover and focus to --accent-hover, which is the dark
+ * blue of this very sidebar: on it the link all but disappears. Every
+ * interactive state here uses the yellow secondary instead, including :visited,
+ * which a browser would otherwise recolour after the first click.
+ */
+.sidebar a:visited,
+.sidebar a.link:hover,
+.sidebar a.link:focus,
+.sidebar a.link:active,
+.sidebar button.link:hover,
+.sidebar button.link:focus,
+.sidebar button.link:active {
+  color: var(--secondary);
 }
 
 .sidebar__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-2);
   padding: var(--space-4);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--primary-600);
 }
 
+/* heading4, inverted on the dark band. */
 .brand {
+  font-family: var(--font-heading);
   font-weight: 600;
-  letter-spacing: -0.01em;
+  font-size: 1.25rem;
+  color: #ffffff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The one yellow CTA in the chrome: start a new conversation. */
+.sidebar .icon-button {
+  background: var(--secondary);
+  border-color: var(--secondary);
+  color: var(--primary);
+  flex: none;
+}
+
+.sidebar .icon-button:hover,
+.sidebar .icon-button:focus {
+  background: var(--secondary-600);
+  border-color: var(--secondary-600);
+  color: var(--primary-900);
+}
+
+.sidebar :focus-visible {
+  outline-color: var(--secondary);
 }
 
 .conversations {
@@ -375,20 +645,22 @@ input[type='file'] {
 }
 
 .conversation {
+  align-items: flex-start;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  border-radius: var(--radius);
+  border-left: 3px solid transparent;
   padding: 0 var(--space-1) 0 var(--space-3);
+  transition: background var(--transition);
 }
 
 .conversation:hover {
-  background: var(--bg-raised);
+  background: var(--primary-600);
 }
 
 .conversation[aria-current='true'] {
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
+  background: var(--primary-600);
+  border-left-color: var(--secondary);
 }
 
 .conversation__open {
@@ -396,21 +668,45 @@ input[type='file'] {
   min-width: 0;
   background: none;
   border: none;
-  color: var(--text);
+  color: #ffffff;
   text-align: left;
+  text-transform: none;
   padding: var(--space-2) 0;
   font-weight: 400;
+  font-size: 0.875rem;
+  line-height: 1.35;
+  /*
+   * Two lines, then an ellipsis. Titles are already cut to 60 characters when
+   * they are derived (deriveTitle in routes/chat.ts), which is about what two
+   * lines hold at this width — so the clamp is a safety net, not the limit.
+   */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.conversation__open:hover,
+.conversation__open:focus {
+  background: none;
+  color: #ffffff;
 }
 
 .conversation__delete {
   background: none;
   border: none;
-  color: var(--text-muted);
+  color: #ffffff;
   padding: 2px 6px;
   opacity: 0;
+}
+
+.conversation__delete:hover,
+.conversation__delete:focus {
+  background: none;
+  color: var(--secondary);
 }
 
 .conversation:hover .conversation__delete,
@@ -419,10 +715,11 @@ input[type='file'] {
 }
 
 .sidebar__foot {
-  border-top: 1px solid var(--border);
-  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--primary-600);
+  padding: var(--space-4);
   display: grid;
-  gap: var(--space-1);
+  gap: var(--space-2);
+  font-size: 0.875rem;
 }
 
 .sidebar__foot .muted {
@@ -431,51 +728,87 @@ input[type='file'] {
   white-space: nowrap;
 }
 
+.sidebar__foot .row {
+  gap: var(--space-3);
+}
+
 .chat {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  background: var(--bg);
 }
 
 .chat__head {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--border);
+  padding: var(--space-4);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow);
+  z-index: 1;
 }
 
+/*
+ * The conversation title is already the highlighted entry in the sidebar, so
+ * showing it again above the thread is duplication. It stays in the markup as
+ * the page's h1 — screen readers and the tab title still want it — but is not
+ * drawn.
+ */
 .chat__head h1 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
   margin: 0;
-  font-size: 0.95rem;
-  font-weight: 500;
   overflow: hidden;
-  text-overflow: ellipsis;
+  clip: rect(0 0 0 0);
   white-space: nowrap;
+}
+
+/*
+ * With the heading hidden the bar holds only the mobile sidebar toggle, so on a
+ * wide screen there is nothing left to draw.
+ */
+.chat__head {
+  padding: 0;
+  background: none;
+  box-shadow: none;
 }
 
 .messages {
   flex: 1;
   overflow-y: auto;
-  padding: var(--space-5) var(--space-4);
+  padding: var(--space-6) var(--space-4);
   display: grid;
-  gap: var(--space-4);
+  gap: var(--space-5);
   align-content: start;
 }
 
+/* .prose: 65ch of comfortable reading width. */
 .message {
-  max-width: 720px;
+  max-width: 65ch;
   width: 100%;
   margin: 0 auto;
   display: grid;
-  gap: var(--space-1);
+  gap: var(--space-2);
+  line-height: 1.75;
 }
 
+/* heading6 */
 .message__role {
-  font-size: 0.75rem;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  color: var(--primary);
+}
+
+@media (prefers-color-scheme: dark) {
+  .message__role {
+    color: var(--secondary);
+  }
 }
 
 .message__body {
@@ -485,24 +818,23 @@ input[type='file'] {
 
 .message--user .message__body {
   background: var(--bubble-user);
-  border-radius: var(--radius);
-  padding: var(--space-3);
+  border-radius: var(--radius-card);
+  padding: var(--space-4);
 }
 
 .message--error .message__body {
-  color: var(--danger);
+  color: var(--danger-text);
+  border-left: 4px solid var(--red);
+  padding-left: var(--space-3);
 }
 
 .message code {
   font-family: var(--font-mono);
   font-size: 0.9em;
-  background: var(--bg-subtle);
-  padding: 1px 4px;
-  border-radius: 4px;
 }
 
 .empty-state {
-  max-width: 720px;
+  max-width: 65ch;
   margin: auto;
   text-align: center;
   color: var(--text-muted);
@@ -527,13 +859,15 @@ input[type='file'] {
 
 .composer {
   display: flex;
-  gap: var(--space-2);
+  gap: var(--space-3);
   align-items: flex-end;
-  padding: var(--space-3) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom));
-  border-top: 1px solid var(--border);
-  max-width: 752px;
   width: 100%;
-  margin: 0 auto;
+  border-top: 1px solid var(--border-strong);
+  padding-top: var(--space-4);
+  padding-bottom: calc(var(--space-5) + env(safe-area-inset-bottom));
+  /* Centres the field on the message column while the rule still spans the
+     whole pane — a rule that stopped at the form's width read as a stray line. */
+  padding-inline: max(var(--space-4), (100% - (65ch + 8rem)) / 2);
 }
 
 .composer textarea {
@@ -555,8 +889,9 @@ input[type='file'] {
     inset: 0 auto 0 0;
     width: min(80vw, var(--sidebar-width));
     z-index: 10;
+    box-shadow: var(--shadow);
     transform: translateX(-100%);
-    transition: transform 0.18s ease;
+    transition: transform var(--transition);
   }
 
   .sidebar.is-open {
@@ -564,7 +899,13 @@ input[type='file'] {
   }
 
   .only-mobile {
-    display: inline-block;
+    display: inline-flex;
+  }
+
+  .chat__head {
+    padding: var(--space-4);
+    background: var(--bg-raised);
+    box-shadow: var(--shadow);
   }
 }
 
@@ -579,44 +920,21 @@ input[type='file'] {
 .settings {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: var(--space-4);
   max-width: 46rem;
 }
 
 .settings hr {
   border: 0;
-  border-top: 1px solid var(--border);
-  margin: 0.5rem 0;
+  border-top: 1px solid var(--border-strong);
+  margin: var(--space-2) 0;
   width: 100%;
-}
-
-.settings .field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.settings .field > label {
-  font-weight: 500;
-}
-
-.settings select,
-.settings textarea,
-.settings input[type='text'],
-.settings input[type='number'] {
-  width: 100%;
-  padding: 0.5rem 0.65rem;
-  border: 1px solid var(--border-strong);
-  border-radius: 0.5rem;
-  background: var(--bg-raised);
-  color: var(--text);
-  font: inherit;
 }
 
 .settings textarea {
   resize: vertical;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.85rem;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
 }
 
 .settings .muted {
@@ -625,36 +943,37 @@ input[type='file'] {
 
 .settings > button {
   align-self: flex-start;
-  margin-top: 0.5rem;
+  margin-top: var(--space-2);
 }
 
 /* ---------- thinking and sources ---------- */
 
 .thinking {
-  margin-bottom: 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  margin-bottom: var(--space-3);
+  border-left: 4px solid var(--gray-600);
   background: var(--bg-subtle);
-  font-size: 0.9rem;
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
 }
 
 .thinking summary {
   cursor: pointer;
-  padding: 0.4rem 0.6rem;
+  padding: var(--space-2) var(--space-3);
   color: var(--text-muted);
+  font-weight: 600;
   user-select: none;
 }
 
 .thinking__body {
-  padding: 0 0.6rem 0.6rem;
+  padding: 0 var(--space-3) var(--space-3);
   color: var(--text-muted);
   white-space: pre-wrap;
 }
 
 .sources {
-  margin: 0.75rem 0 0;
+  margin: var(--space-4) 0 0;
   padding-left: 1.1rem;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   color: var(--text-muted);
 }
 
@@ -671,39 +990,41 @@ input[type='file'] {
 .balance {
   display: flex;
   align-items: center;
-  gap: 1.5rem;
+  gap: var(--space-6);
   flex-wrap: wrap;
-  padding: 0.85rem 1rem;
-  border: 1px solid var(--border);
-  border-left-width: 4px;
-  border-radius: 0.5rem;
+  padding: var(--space-4);
+  border-left: 4px solid var(--gray-600);
+  border-radius: var(--radius-md);
   background: var(--bg-subtle);
 }
 
-.balance--ok { border-left-color: #16a34a; }
-.balance--low { border-left-color: #d97706; }
-.balance--empty { border-left-color: #dc2626; }
+.balance--ok { border-left-color: var(--green); }
+.balance--low { border-left-color: var(--secondary); }
+.balance--empty { border-left-color: var(--red); }
 
 .balance__figure {
   display: flex;
   flex-direction: column;
 }
 
+/* heading2 */
 .balance__amount {
-  font-size: 1.6rem;
+  font-family: var(--font-heading);
+  font-size: 1.875rem;
   font-weight: 600;
-  line-height: 1.2;
+  line-height: 1.25;
+  color: var(--heading);
 }
 
-.balance--empty .balance__amount { color: #dc2626; }
-.balance--low .balance__amount { color: #d97706; }
+.balance--empty .balance__amount { color: var(--danger-text); }
+.balance--low .balance__amount { color: var(--bordeaux); }
 
 .balance__detail {
   display: grid;
   grid-template-columns: auto auto;
   gap: 0.15rem 0.75rem;
   margin: 0;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   color: var(--text-muted);
 }
 
@@ -711,53 +1032,105 @@ input[type='file'] {
 .balance__detail dd { grid-column: 2; margin: 0; }
 
 .balance__warning {
-  margin: 0.6rem 0 0;
-  font-size: 0.9rem;
-  color: #dc2626;
+  margin: var(--space-3) 0 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--danger-text);
 }
 
-.balance--low .balance__warning { color: #d97706; }
+.balance--low .balance__warning { color: var(--bordeaux); }
+
+/* Bordeaux vanishes against the navy ground; yellow is the dark-mode warning. */
+@media (prefers-color-scheme: dark) {
+  .balance--low .balance__amount,
+  .balance--low .balance__warning { color: var(--secondary); }
+}
 
 /* ---------- assistant picker ---------- */
+
+/* heading2 promoted to heading1 from xl up, per §2 — not an ad-hoc size. */
+.page--picker h1 {
+  font-size: 1.875rem;
+  line-height: 1.25;
+}
+
+@media (min-width: 1280px) {
+  .page--picker h1 {
+    font-size: 3rem;
+    line-height: 1.25;
+  }
+}
 
 .picker {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
-  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
+  gap: var(--space-5);
 }
 
+/*
+ * The card pattern from §5: white surface, rounded-lg, shadow-md, and the
+ * whole card is one target — hovering it fills the CTA, as `group-hover` does
+ * on the site.
+ */
 .picker__card {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: var(--space-2);
   height: 100%;
-  padding: 1.1rem 1.2rem;
-  border: 1px solid var(--border);
-  border-radius: 0.75rem;
+  padding: var(--space-5);
+  border-top: 4px solid var(--secondary);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow);
   background: var(--bg-raised);
   color: inherit;
   text-decoration: none;
-  transition: border-color 0.12s ease, transform 0.12s ease;
+  overflow: hidden;
+  transition: all var(--transition);
 }
 
 .picker__card:hover,
 .picker__card:focus-visible {
-  border-color: var(--border-strong);
-  transform: translateY(-1px);
+  background: var(--primary-600);
+  border-top-color: var(--secondary-600);
 }
 
+.picker__card:hover .picker__name,
+.picker__card:focus-visible .picker__name,
+.picker__card:hover .picker__description,
+.picker__card:focus-visible .picker__description {
+  color: #ffffff;
+}
+
+/* heading4 */
 .picker__name {
-  font-size: 1.05rem;
+  font-family: var(--font-heading);
+  font-size: 1.25rem;
   font-weight: 600;
+  color: var(--heading);
+  transition: color var(--transition);
 }
 
 .picker__description {
-  font-size: 0.87rem;
+  font-size: 1rem;
   color: var(--text-muted);
-  line-height: 1.45;
+  line-height: 1.5rem;
+  /* line-clamp-3, as the site's cards do. */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  transition: color var(--transition);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .picker__card,
+  .picker__name,
+  .picker__description {
+    transition: none;
+  }
 }
 
 /* ---------- circuit background (assistant picker) ---------- */
@@ -765,6 +1138,7 @@ input[type='file'] {
 .has-paths {
   position: relative;
   overflow-x: hidden;
+  background: var(--bg-subtle);
 }
 
 .circuit {
@@ -777,11 +1151,11 @@ input[type='file'] {
   pointer-events: none;
   /* Faint enough to sit behind text; the glow makes it read stronger than the
      number suggests, and stronger again against a dark ground. */
-  opacity: 0.5;
+  opacity: 0.6;
 }
 
 @media (prefers-color-scheme: dark) {
-  .circuit { opacity: 0.42; }
+  .circuit { opacity: 0.5; }
 }
 
 .circuit__trace {
