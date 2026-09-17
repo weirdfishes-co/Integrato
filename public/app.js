@@ -60,7 +60,8 @@ function renderConversations() {
     const open = document.createElement('button');
     open.type = 'button';
     open.className = 'conversation__open';
-    open.textContent = conversation.title;
+    // Shortened for the narrow sidebar; the full title stays in the tooltip.
+    open.textContent = shortenTitle(conversation.title);
     open.title = conversation.title;
     open.addEventListener('click', () => {
       void openConversation(conversation.id);
@@ -80,6 +81,14 @@ function renderConversations() {
     item.append(open, remove);
     els.conversations.append(item);
   }
+}
+
+/** Longest conversation title the sidebar shows before an ellipsis. */
+const MAX_TITLE_CHARS = 40;
+
+function shortenTitle(title) {
+  if (title.length <= MAX_TITLE_CHARS) return title;
+  return `${title.slice(0, MAX_TITLE_CHARS - 1).trimEnd()}…`;
 }
 
 function addMessage(role, text, options = {}) {

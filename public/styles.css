@@ -598,18 +598,42 @@ input[type='file'] {
 
 .sidebar__head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-2);
   padding: var(--space-4);
   border-bottom: 1px solid var(--primary-600);
 }
 
-/* heading4, inverted on the dark band. */
+.sidebar__brand {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/*
+ * The supplied logo is the colour-on-white variant, and the styleguide (§ nav)
+ * uses a white variant on dark grounds. Without that file the mark is set on a
+ * white plate instead, which is how the brand appears on light sections of the
+ * site — letting dark-blue type sit directly on the dark-blue sidebar would
+ * make it unreadable.
+ */
 .brand {
+  display: block;
+  width: 100%;
+  max-width: 190px;
+  height: auto;
+  background: #ffffff;
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+}
+
+/* heading4, inverted on the dark band. */
+.brand__assistant {
   font-family: var(--font-heading);
   font-weight: 600;
-  font-size: 1.25rem;
+  font-size: 1rem;
   color: #ffffff;
   overflow: hidden;
   text-overflow: ellipsis;
