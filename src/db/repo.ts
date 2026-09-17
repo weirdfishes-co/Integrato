@@ -24,6 +24,8 @@ export interface Assistant {
   name: string;
   description: string;
   language: string;
+  /** Greeting for an empty conversation; empty means use the built-in one. */
+  welcome: string;
   createdAt: string;
 }
 
@@ -72,6 +74,7 @@ interface AssistantRow {
   name: string;
   description: string;
   language: string;
+  welcome: string;
   created_at: string;
 }
 
@@ -133,6 +136,7 @@ function toAssistant(row: AssistantRow): Assistant {
     name: row.name,
     description: row.description,
     language: row.language,
+    welcome: row.welcome,
     createdAt: requireTime(row.created_at),
   };
 }
@@ -400,10 +404,11 @@ export function createRepo(db: Db) {
       name: string,
       description: string,
       language: string,
+      welcome: string,
     ): Promise<void> {
       await db.run(
-        'UPDATE assistants SET name = $1, description = $2, language = $3 WHERE id = $4',
-        [name, description, language, id],
+        'UPDATE assistants SET name = $1, description = $2, language = $3, welcome = $4 WHERE id = $5',
+        [name, description, language, welcome, id],
       );
     },
 

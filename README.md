@@ -78,6 +78,8 @@ An admin creates assistants on **`/admin`**. Each one gets:
   Names that would collide with a built-in path (`admin`, `api`, `login`, …)
   get a numbered slug instead, so the assistant stays reachable. The old
   `/a/<slug>` form redirects to the new one
+- its own **welcome message**, shown in an empty conversation (500 characters;
+  empty falls back to a built-in sentence)
 - its own **instructions and knowledge base**, under
   `<ASSISTANTS_DIR>/<slug>/instr.md` and `<ASSISTANTS_DIR>/<slug>/context/*.md`
 - its own **model, effort, web search, memory, citations and compaction**
@@ -199,7 +201,7 @@ restart, no redeploy.
 | Setting | What it does |
 | --- | --- |
 | **Model** | Any model OpenRouter offers, with context size and price shown |
-| **Identity** | The assistant's name, description and answer language |
+| **Identity** | The coachbot's name, description, answer language and welcome message |
 | **Reasoning effort** | `low` … `max`. Models without reasoning support ignore it |
 | **Show thinking** | Streams the model's reasoning above the answer, collapsed |
 | **Web search** | Look things up beyond the knowledge base; billed per search |

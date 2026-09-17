@@ -41,6 +41,8 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
 ]);
 export const MAX_NAME_LENGTH = 80;
 export const MAX_DESCRIPTION_LENGTH = 200;
+/** Greeting shown in an empty conversation. */
+export const MAX_WELCOME_LENGTH = 500;
 
 export class AssistantError extends Error {}
 

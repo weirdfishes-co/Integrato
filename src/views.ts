@@ -1,3 +1,4 @@
+import { MAX_WELCOME_LENGTH } from './assistants.js';
 import type { Balance } from './balance.js';
 import { COMPACT_THRESHOLD } from './compaction.js';
 import type { DocumentSummary } from './content.js';
@@ -272,7 +273,8 @@ ${passwordField}
         title: assistant.name,
         scripts: ['/app.js'],
         body: `    <div class="app" data-email="${escapeHtml(user.email)}" data-assistant="${label}"
-         data-slug="${escapeHtml(assistant.slug)}">
+         data-slug="${escapeHtml(assistant.slug)}"
+         data-welcome="${escapeHtml(assistant.welcome)}">
       <aside class="sidebar" id="sidebar">
         <div class="sidebar__head">
           <div class="sidebar__brand">
@@ -517,6 +519,13 @@ ${(options.effortLevels ?? [])
           <div class="field">
             <label for="language">Answer language</label>
             <input id="language" name="language" type="text" required value="${escapeHtml(assistant.language)}">
+          </div>
+          <div class="field">
+            <label for="welcome">Welcome message</label>
+            <textarea id="welcome" name="welcome" rows="4" maxlength="${MAX_WELCOME_LENGTH}"
+                      placeholder="Ask your first question — answers are based on the supplied context."
+                      >${escapeHtml(assistant.welcome)}</textarea>
+            <p class="muted small">Shown in an empty conversation, at most ${MAX_WELCOME_LENGTH} characters. Leave it empty for the default sentence.</p>
           </div>
           <p class="muted small">Address: <code>/${escapeHtml(assistant.slug)}</code> — fixed once created.</p>
           <button type="submit">Save identity</button>

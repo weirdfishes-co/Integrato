@@ -918,6 +918,7 @@ input[type='file'] {
 }
 
 .empty-state {
+  white-space: pre-line;
   max-width: 65ch;
   margin: auto;
   text-align: center;

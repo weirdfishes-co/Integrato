@@ -134,6 +134,39 @@ describe('the rights matrix', () => {
   });
 });
 
+describe('the welcome message', () => {
+  let repo: Repo;
+
+  beforeEach(async () => {
+    repo = await freshRepo();
+  });
+
+  it('starts empty, which means the built-in sentence is used', async () => {
+    const coach = await repo.createAssistant('coach', 'Coach', '', 'English');
+
+    expect(coach.welcome).toBe('');
+  });
+
+  it('round-trips what an admin typed, newlines and all', async () => {
+    const coach = await repo.createAssistant('coach', 'Coach', '', 'English');
+    const welcome = 'Welcome.\n\nAsk me anything.';
+
+    await repo.updateAssistant(coach.id, 'Coach', '', 'English', welcome);
+
+    expect((await repo.findAssistantById(coach.id))?.welcome).toBe(welcome);
+  });
+
+  it('is kept per coachbot', async () => {
+    const coach = await repo.createAssistant('coach', 'Coach', '', 'English');
+    const hr = await repo.createAssistant('hr', 'HR', '', 'English');
+
+    await repo.updateAssistant(coach.id, 'Coach', '', 'English', 'Only for the coach.');
+
+    expect((await repo.findAssistantById(coach.id))?.welcome).toBe('Only for the coach.');
+    expect((await repo.findAssistantById(hr.id))?.welcome).toBe('');
+  });
+});
+
 describe('per-assistant isolation', () => {
   let repo: Repo;
 

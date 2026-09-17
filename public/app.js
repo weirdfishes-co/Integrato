@@ -21,6 +21,10 @@ const assistantName = document.querySelector('.app')?.dataset.assistant || 'Assi
 /** Every API call is scoped to the assistant this page belongs to. */
 const assistantSlug = document.querySelector('.app')?.dataset.slug || '';
 const apiBase = `/api/${encodeURIComponent(assistantSlug)}`;
+/** Set per coachbot on its admin page; empty falls back to the sentence below. */
+const welcomeMessage =
+  document.querySelector('.app')?.dataset.welcome?.trim() ||
+  'Ask your first question — answers are based on the supplied context.';
 
 const state = {
   conversations: [],
@@ -151,7 +155,7 @@ function showEmptyState() {
   els.messages.replaceChildren();
   const empty = document.createElement('p');
   empty.className = 'empty-state';
-  empty.textContent = 'Ask your first question — answers are based on the supplied context.';
+  empty.textContent = welcomeMessage;
   els.messages.append(empty);
 }
 

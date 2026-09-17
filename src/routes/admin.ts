@@ -7,6 +7,7 @@ import {
   uniqueSlug,
   MAX_DESCRIPTION_LENGTH,
   MAX_NAME_LENGTH,
+  MAX_WELCOME_LENGTH,
 } from '../assistants.js';
 import type { Auth } from '../auth.js';
 import { fetchBalance } from '../balance.js';
@@ -166,6 +167,9 @@ export function createAdminRouter({
     const name = text(req.body, 'name');
     const description = text(req.body, 'description').slice(0, MAX_DESCRIPTION_LENGTH);
     const language = text(req.body, 'language');
+    // Cut rather than refuse: maxlength on the field already stops an honest
+    // browser, and losing a long paste is worse than silently trimming it.
+    const welcome = text(req.body, 'welcome').slice(0, MAX_WELCOME_LENGTH);
 
     if (name.length === 0 || name.length > MAX_NAME_LENGTH || language.length === 0) {
       res
@@ -175,7 +179,7 @@ export function createAdminRouter({
       return;
     }
 
-    await repo.updateAssistant(assistant.id, name, description, language);
+    await repo.updateAssistant(assistant.id, name, description, language, welcome);
     logger.info({ by: req.user!.id, assistantId: assistant.id }, 'assistant updated');
     res.redirect(`/admin/assistants/${assistant.id}?ok=${encodeURIComponent('Identity saved.')}`);
   });
