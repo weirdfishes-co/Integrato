@@ -37,25 +37,56 @@ describe('parseSender', () => {
 
 describe('buildMagicLinkEmail', () => {
   const link = 'https://example.com/auth/callback?token=abc123';
+  const APP_URL = 'https://coach.example.com';
 
   it('names the assistant in the subject', () => {
-    expect(buildMagicLinkEmail('Coach', link, 30).subject).toBe('Your sign-in link for Coach');
+    expect(buildMagicLinkEmail('Coach', APP_URL, link, 30).subject).toBe('Your sign-in link for Coach');
   });
 
   it('puts the link in both the text and the html body', () => {
-    const message = buildMagicLinkEmail('Coach', link, 30);
+    const message = buildMagicLinkEmail('Coach', APP_URL, link, 30);
 
     expect(message.text).toContain(link);
     expect(message.html).toContain(link);
   });
 
   it('states how long the link is valid', () => {
-    expect(buildMagicLinkEmail('Coach', link, 15).text).toContain('15 minutes');
+    expect(buildMagicLinkEmail('Coach', APP_URL, link, 15).text).toContain('15 minutes');
+  });
+
+  it('points the logo at an absolute url, since a mail client cannot resolve a relative one', () => {
+    const message = buildMagicLinkEmail('Coach', APP_URL, link, 30);
+
+    expect(message.html).toContain(`${APP_URL}/header_ny.jpg`);
+    expect(message.html).toContain('alt="Nyenrode Business Universiteit"');
+  });
+
+  it('does not double the slash when APP_URL has a trailing one', () => {
+    const message = buildMagicLinkEmail('Coach', `${APP_URL}/`, link, 30);
+
+    expect(message.html).toContain(`${APP_URL}/header_ny.jpg`);
+    expect(message.html).not.toContain('//header_ny.jpg');
+  });
+
+  it('carries the brand colours inline, since a mail client loads no stylesheet', () => {
+    const message = buildMagicLinkEmail('Coach', APP_URL, link, 30);
+
+    expect(message.html).toContain('#355071');
+    expect(message.html).toContain('#fbba20');
+    expect(message.html).not.toContain('<style');
+  });
+
+  it('still reads with the images stripped, which most clients do by default', () => {
+    const message = buildMagicLinkEmail('Coach', APP_URL, link, 30);
+    const withoutImages = message.html.replace(/<img[^>]*>/g, '');
+
+    expect(withoutImages).toContain('Sign in to Coach');
+    expect(withoutImages).toContain(link);
   });
 
   it('escapes html so a crafted link cannot inject markup', () => {
     const hostile = 'https://example.com/?token="><script>alert(1)</script>';
-    const message = buildMagicLinkEmail('Coach', hostile, 30);
+    const message = buildMagicLinkEmail('Coach', APP_URL, hostile, 30);
 
     expect(message.html).not.toContain('<script>');
     expect(message.html).toContain('&lt;script&gt;');
