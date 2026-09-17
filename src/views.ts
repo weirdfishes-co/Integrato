@@ -314,7 +314,7 @@ ${passwordField}
     pickerPage(user, assistants) {
       const cards =
         assistants.length === 0
-          ? `        <p class="muted">You do not have access to an assistant yet. Ask an administrator to give you access.</p>`
+          ? `        <p class="muted">You do not have access to a coachbot yet. Ask an administrator to give you access.</p>`
           : `        <ul class="picker">
 ${assistants
   .map(
@@ -333,13 +333,13 @@ ${assistants
         </ul>`;
 
       return layout({
-        title: `Assistants — ${assistantName}`,
+        title: `Coachbots — ${assistantName}`,
         body: `    <main class="page page--picker">
       <header class="page__head">
         <div class="page__brand">
           <img class="brand brand--page" src="/header_ny.jpg?v=${ASSET_VERSION}" width="523" height="119"
                alt="Nyenrode Business Universiteit">
-          <h1>Choose an assistant</h1>
+          <h1>Choose a coachbot</h1>
         </div>
         <div class="row">
           ${user.isAdmin ? '<a class="link" href="/admin">Admin</a>' : ''}
