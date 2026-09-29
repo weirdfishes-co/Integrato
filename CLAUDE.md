@@ -44,6 +44,7 @@ src/
   settings.ts        admin-controlled runtime settings, per assistant
   assistants.ts      slugs, per-assistant paths, first-run migration
   balance.ts         OpenRouter credit + key-limit status for /admin
+  presidio.ts        pseudonymizes user text through Presidio's analyzer
   memory.ts          cross-conversation memory: extraction + prompt section
   compaction.ts      summarizes old turns once a conversation gets long
   content.ts         read/write the knowledge base + path validation + seeding
@@ -64,7 +65,8 @@ scripts/build.mjs    esbuild bundle to dist/ + copy migrations
 scripts/entrypoint.sh  takes ownership of /data, then drops to the node user
 tests/               vitest: auth, content, context, settings, features
                      (memory + compaction), views, mail, assistants
-                     (slugs, rights matrix, isolation)
+                     (slugs, rights matrix, isolation), privacy
+                     (anonymization + EU routing)
 instr.md             system prompt — the user owns its content
 instr.example.md     neutral starting prompt, safe to copy over instr.md
 context/*.md         knowledge base seeded into a brand-new assistant
@@ -152,6 +154,44 @@ context/*.md         knowledge base seeded into a brand-new assistant
   — both swallow their errors by design. Citations are prompt-enforced
   (`CITATION_RULE` in `context.ts`), so a model can forget or invent one; that is
   a known weakness against Anthropic's native citations, not a bug.
+- **A promise is kept where the request is built, not by the callers.** EU-only
+  routing and anonymization are applied inside `llm.ts`, in `stream()` and
+  `complete()` alike, rather than by the routes that call them. A caller that
+  forgot either one would not fail loudly — it would send the data anyway. That
+  is also why `complete()` takes the whole `AssistantSettings` instead of a
+  model id: memory extraction and compaction carry the user's own words, so
+  they have to be anonymized and routed exactly like the conversation they came
+  from. The knobs that are only preferences — sampling — are not applied there.
+- **EU-only routing is a routing rule, not a filter on a dropdown.**
+  `provider.only` carries the model's European endpoint tags with
+  `allow_fallbacks: false`, so OpenRouter refuses rather than reroutes when they
+  are busy. The tags come from `/models/:id/endpoints`; a tag is European when
+  its shard matches `^(eu|europe)(-|$)` — `azure/eu`, `amazon-bedrock/eu-west-1`,
+  `google-vertex/europe`. `global` does **not** count: it includes Europe
+  without being limited to it. `/providers` adds the handful whose every listed
+  data centre is in the EEA and which therefore carry no regional shard; losing
+  that call degrades to the shards alone rather than failing. Unknown is treated
+  as none — the request stops. OpenRouter answers an impossible `provider.only`
+  with a **404**, which is why `describeChatError` names the region there.
+  The picker uses OpenRouter's own `?region=eu` catalogue (~70 models of ~460),
+  and the admin route refuses to *save* a combination that has no EU endpoint,
+  so the failure lands on the admin who caused it and not on every user.
+- **Anonymization uses Presidio's analyzer only**, not presidio-anonymizer. The
+  analyzer says where the personal data is and the substitution happens in
+  `presidio.ts`, which halves the infrastructure and buys the thing a plain
+  replace operator cannot do: one value keeps one placeholder (`<PERSON_1>`),
+  so the model can still tell two people apart. A conversation is analyzed in
+  **one** call — the texts are joined by a separator and the spans mapped back
+  by offset — because one call per message would be 40 on a long thread.
+  It **fails closed**: no service, an error, a hung request, and the message is
+  not sent. Only user turns are rewritten; the system prompt is the admin's own
+  text and is the cached prefix of every request.
+- **An empty sampling field is not zero.** `temperature` and `topP` are
+  `number | null`, and null means "send nothing". A number we picked would be
+  worse than the default the provider tuned, and several reasoning models reject
+  a temperature outright. The settings table has no nulls, so unset is stored as
+  the empty string — which is what keeps it distinguishable from 0, a
+  temperature an admin may well want.
 - **Memory goes after the knowledge base in the system prompt**, never before.
   The knowledge base is the cached prefix shared by every user; putting a
   per-user block in front of it would invalidate the cache for everyone on every
@@ -309,6 +349,16 @@ context/*.md         knowledge base seeded into a brand-new assistant
   hanging send leaves `POST /login` with no response — the user sees an endless
   spinner rather than an error. This is the same failure SMTP used to produce
   when its port was blocked.
+- **`PRESIDIO_LANGUAGE` is not the chatbot's answer language.** It selects the
+  analyzer's recognizers and its spaCy model, so it has to be a language the
+  *service* has installed — the stock image ships `en` only. A chatbot that
+  answers in Dutch still needs a Dutch-capable analyzer image before
+  `PRESIDIO_LANGUAGE=nl` finds anything, and an analyzer that finds nothing
+  fails silently in the only way that matters: the text goes out intact.
+- **Anonymization and EU routing are checked when an admin saves**, in
+  `unusable()` in `routes/admin.ts`. Without that the first user to send a
+  message discovers the misconfiguration, and the admin never sees it. Any new
+  setting that depends on something outside the app belongs in that function.
 - **Never set `ASSISTANTS_DIR` to a relative path in a deployed environment.**
   The image points it at `/data`; a value copied from `.env` such as
   `./data/assistants` resolves inside `/app`, which the `node` user cannot

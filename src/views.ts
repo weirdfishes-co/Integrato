@@ -156,6 +156,10 @@ export interface AssistantPageOptions extends NoticeOptions {
   settings?: AssistantSettings;
   effortLevels?: readonly string[];
   maxSearchResults?: number;
+  maxTemperature?: number;
+  maxTopP?: number;
+  /** False when PRESIDIO_URL is unset, which makes the toggle unusable. */
+  anonymizerConfigured?: boolean;
   /** Every user, with a tick for those granted this assistant. */
   users?: readonly User[];
   grantedUserIds?: readonly number[];
@@ -466,6 +470,21 @@ ${(options.effortLevels ?? [])
   .join('\n')}
             </select>`;
 
+      /*
+       * A model that supports neither knob is worth saying out loud: the
+       * fields would otherwise look like they had been ignored.
+       */
+      const chosen = models.find((model) => model.id === selected);
+      const samplingWarning =
+        chosen && !chosen.supportsSampling
+          ? ' <strong>This model accepts neither setting</strong> — both are ignored for it.'
+          : '';
+
+      const anonymizeHelp =
+        options.anonymizerConfigured === false
+          ? 'Unavailable: no Presidio service is configured. An administrator needs to set <code>PRESIDIO_URL</code>.'
+          : 'Names, addresses, phone numbers and the like are replaced with placeholders (<code>&lt;PERSON_1&gt;</code>) by Presidio before the message leaves. The original is still stored here, and the answer comes back written in terms of the placeholders.';
+
       const userRows = (options.users ?? [])
         .map(
           (user) => `          <tr>
@@ -530,6 +549,11 @@ ${(options.effortLevels ?? [])
           <div class="field">
             <label for="model">Model</label>
             ${modelField}
+            ${
+              settings?.euOnly
+                ? '<p class="muted small">Only models OpenRouter can serve from the EU are listed, because this chatbot is restricted to European providers.</p>'
+                : ''
+            }
           </div>
 
           <div class="field">
@@ -542,6 +566,24 @@ ${(options.effortLevels ?? [])
             <input type="checkbox" name="show_thinking" value="1"${settings?.showThinking ? ' checked' : ''}>
             Show the model's thinking above the answer
           </label>
+
+          <hr>
+
+          <div class="field">
+            <label for="temperature">Temperature</label>
+            <input id="temperature" name="temperature" type="number" step="0.05"
+                   min="0" max="${options.maxTemperature ?? 2}"
+                   value="${settings?.temperature ?? ''}" placeholder="model default">
+            <p class="muted small">How freely the model picks its words: low is predictable, high is inventive. Leave it empty to use the model's own default.</p>
+          </div>
+
+          <div class="field">
+            <label for="top_p">Top-P</label>
+            <input id="top_p" name="top_p" type="number" step="0.05"
+                   min="0" max="${options.maxTopP ?? 1}"
+                   value="${settings?.topP ?? ''}" placeholder="model default">
+            <p class="muted small">Narrows the words it may choose from. Usually you set this <em>or</em> the temperature, not both.${samplingWarning}</p>
+          </div>
 
           <hr>
 
@@ -574,6 +616,22 @@ ${(options.effortLevels ?? [])
                       )}</textarea>
             <p class="muted small">Ignored when the list above is filled in — some search engines accept only one of the two.</p>
           </div>
+
+          <hr>
+
+          <label class="checkbox">
+            <input type="checkbox" name="eu_only" value="1"${settings?.euOnly ? ' checked' : ''}>
+            Only use providers in the EU
+          </label>
+          <p class="muted small">Restricts every request to endpoints served from an EU or EEA data centre, and forbids falling back to any other. The model list above then shows only models that have one.</p>
+
+          <label class="checkbox">
+            <input type="checkbox" name="anonymize" value="1"${settings?.anonymize ? ' checked' : ''}${
+              options.anonymizerConfigured === false ? ' disabled' : ''
+            }>
+            Anonymize messages before sending them
+          </label>
+          <p class="muted small">${anonymizeHelp}</p>
 
           <hr>
 

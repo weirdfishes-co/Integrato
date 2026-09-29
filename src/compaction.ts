@@ -80,7 +80,7 @@ export async function compactConversation(
       : 'Messages to summarize:\n';
 
     const summary = await chat.complete({
-      model: settings.model,
+      settings,
       system: SUMMARY_SYSTEM,
       user: `${previous}${render(pending)}`,
       maxTokens: SUMMARY_MAX_TOKENS,

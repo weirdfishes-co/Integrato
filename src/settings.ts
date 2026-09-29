@@ -26,6 +26,20 @@ export interface AssistantSettings {
   citations: boolean;
   /** Summarize old turns instead of dropping them once a thread gets long. */
   compaction: boolean;
+  /**
+   * Route only through providers that serve this model from an EU data centre.
+   * Enforced on the request itself, not just in the model picker.
+   */
+  euOnly: boolean;
+  /** Strip personal data out of user messages before they leave for the model. */
+  anonymize: boolean;
+  /**
+   * Sampling knobs. `null` means "send nothing and let the model use its own
+   * default", which is not the same as any number we could pick: several
+   * reasoning models reject a temperature outright.
+   */
+  temperature: number | null;
+  topP: number | null;
 }
 
 const KEYS = {
@@ -39,12 +53,20 @@ const KEYS = {
   memory: 'memory',
   citations: 'citations',
   compaction: 'compaction',
+  euOnly: 'eu_only',
+  anonymize: 'anonymize',
+  temperature: 'temperature',
+  topP: 'top_p',
 } as const;
 
 export type SettingKey = keyof typeof KEYS;
 
 export const MAX_SEARCH_RESULTS = 20;
 const DEFAULT_SEARCH_RESULTS = 5;
+
+/** OpenRouter's own bounds; a value outside them is rejected by the API. */
+export const MAX_TEMPERATURE = 2;
+export const MAX_TOP_P = 1;
 
 /** All settings are read in one query, so these work on the resulting map. */
 type Stored = ReadonlyMap<string, string>;
@@ -65,6 +87,27 @@ function readCount(stored: Stored, key: string, fallback: number): number {
   const parsed = Number.parseInt(stored.get(key) ?? '', 10);
   if (!Number.isInteger(parsed) || parsed < 1) return fallback;
   return Math.min(parsed, MAX_SEARCH_RESULTS);
+}
+
+/**
+ * An empty string is stored for "unset", because the settings table holds no
+ * nulls — and unset has to stay distinguishable from 0, which is a temperature
+ * an admin may well want.
+ */
+function readNumber(stored: Stored, key: string, max: number): number | null {
+  const raw = stored.get(key);
+  if (raw === undefined || raw.trim().length === 0) return null;
+  const parsed = Number.parseFloat(raw);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > max) return null;
+  return parsed;
+}
+
+/** Parses what an admin typed into a sampling field; blank stays blank. */
+export function parseSampling(raw: string, max: number): number | null {
+  if (raw.trim().length === 0) return null;
+  const parsed = Number.parseFloat(raw);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.min(Math.max(parsed, 0), max);
 }
 
 /** Domains are stored newline-separated, one per line. */
@@ -98,6 +141,10 @@ export async function loadSettings(
     memory: readBoolean(stored, KEYS.memory, false),
     citations: readBoolean(stored, KEYS.citations, false),
     compaction: readBoolean(stored, KEYS.compaction, false),
+    euOnly: readBoolean(stored, KEYS.euOnly, false),
+    anonymize: readBoolean(stored, KEYS.anonymize, false),
+    temperature: readNumber(stored, KEYS.temperature, MAX_TEMPERATURE),
+    topP: readNumber(stored, KEYS.topP, MAX_TOP_P),
   };
 }
 
@@ -117,4 +164,8 @@ export async function saveSettings(
   await repo.setSetting(assistantId, KEYS.memory, settings.memory ? '1' : '0');
   await repo.setSetting(assistantId, KEYS.citations, settings.citations ? '1' : '0');
   await repo.setSetting(assistantId, KEYS.compaction, settings.compaction ? '1' : '0');
+  await repo.setSetting(assistantId, KEYS.euOnly, settings.euOnly ? '1' : '0');
+  await repo.setSetting(assistantId, KEYS.anonymize, settings.anonymize ? '1' : '0');
+  await repo.setSetting(assistantId, KEYS.temperature, settings.temperature === null ? '' : String(settings.temperature));
+  await repo.setSetting(assistantId, KEYS.topP, settings.topP === null ? '' : String(settings.topP));
 }

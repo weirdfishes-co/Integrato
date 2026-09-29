@@ -4,7 +4,13 @@ import { closeAll, freshRepo } from './helpers/db.js';
 
 import type { Config } from '../src/config.js';
 import type { Repo } from '../src/db/repo.js';
-import { loadSettings, parseDomains, saveSettings } from '../src/settings.js';
+import {
+  loadSettings,
+  parseDomains,
+  parseSampling,
+  saveSettings,
+  MAX_TEMPERATURE,
+} from '../src/settings.js';
 
 /** Settings are per assistant, so every test needs one to hang them on. */
 async function freshAssistant(repo: Repo, slug = 'coach'): Promise<number> {
@@ -57,6 +63,34 @@ describe('loadSettings', () => {
     expect(settings.memory).toBe(false);
     expect(settings.citations).toBe(false);
     expect(settings.compaction).toBe(false);
+    expect(settings.euOnly).toBe(false);
+    expect(settings.anonymize).toBe(false);
+  });
+
+  /*
+   * Not zero, and not a number of our own choosing: an unset knob has to stay
+   * unset, so the model uses the default its provider tuned.
+   */
+  it('leaves temperature and top-p unset until an admin fills them in', async () => {
+    const settings = await loadSettings(repo, config, assistantId);
+
+    expect(settings.temperature).toBeNull();
+    expect(settings.topP).toBeNull();
+  });
+
+  it('keeps a temperature of zero, which is a real choice', async () => {
+    await repo.setSetting(assistantId, 'temperature', '0');
+
+    expect((await loadSettings(repo, config, assistantId)).temperature).toBe(0);
+  });
+
+  it('ignores a sampling value outside the range the API accepts', async () => {
+    await repo.setSetting(assistantId, 'temperature', '11');
+    await repo.setSetting(assistantId, 'top_p', '-1');
+
+    const settings = await loadSettings(repo, config, assistantId);
+    expect(settings.temperature).toBeNull();
+    expect(settings.topP).toBeNull();
   });
 
   it('prefers the admin choice over the configured default', async () => {
@@ -83,6 +117,10 @@ describe('loadSettings', () => {
       memory: true,
       citations: true,
       compaction: true,
+      euOnly: true,
+      anonymize: true,
+      temperature: 0.3,
+      topP: null,
     });
 
     expect(await loadSettings(repo, config, assistantId)).toEqual({
@@ -96,6 +134,10 @@ describe('loadSettings', () => {
       memory: true,
       citations: true,
       compaction: true,
+      euOnly: true,
+      anonymize: true,
+      temperature: 0.3,
+      topP: null,
     });
   });
 
@@ -103,6 +145,26 @@ describe('loadSettings', () => {
     await repo.setSetting(assistantId, 'web_search_max_results', '9999');
 
     expect((await loadSettings(repo, config, assistantId)).webSearchMaxResults).toBe(20);
+  });
+});
+
+describe('parseSampling', () => {
+  it('reads a number an admin typed', async () => {
+    expect(parseSampling('0.7', MAX_TEMPERATURE)).toBe(0.7);
+  });
+
+  it('treats a blank field as "leave it to the model"', async () => {
+    expect(parseSampling('', MAX_TEMPERATURE)).toBeNull();
+    expect(parseSampling('   ', MAX_TEMPERATURE)).toBeNull();
+  });
+
+  it('clamps rather than refuses, so a typo does not lose the whole form', async () => {
+    expect(parseSampling('9', MAX_TEMPERATURE)).toBe(MAX_TEMPERATURE);
+    expect(parseSampling('-3', MAX_TEMPERATURE)).toBe(0);
+  });
+
+  it('rejects something that is not a number at all', async () => {
+    expect(parseSampling('warm', MAX_TEMPERATURE)).toBeNull();
   });
 });
 

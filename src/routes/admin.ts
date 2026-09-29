@@ -15,12 +15,15 @@ import { EFFORT_LEVELS, normalizeEmail, type Config, type Effort } from '../conf
 import type { ContentPaths } from '../content.js';
 import type { Assistant, Repo } from '../db/repo.js';
 import { logger } from '../logger.js';
-import { listModels, type ModelOption } from '../models.js';
+import { euProviderTags, listModels, type ModelOption } from '../models.js';
 import {
   loadSettings,
   parseDomains,
+  parseSampling,
   saveSettings,
   MAX_SEARCH_RESULTS,
+  MAX_TEMPERATURE,
+  MAX_TOP_P,
   type AssistantSettings,
 } from '../settings.js';
 import type { Views } from '../views.js';
@@ -69,10 +72,14 @@ export function createAdminRouter({
   /**
    * The catalogue needs a network call, so a failure must not take the whole
    * page down: the picker degrades to a plain text field when the list is empty.
+   *
+   * An EU-only chatbot is offered OpenRouter's European catalogue instead of
+   * the whole one, so the picker cannot suggest a model the routing rules will
+   * then refuse.
    */
-  async function modelChoices(): Promise<ModelOption[]> {
+  async function modelChoices(euOnly: boolean): Promise<ModelOption[]> {
     try {
-      return await listModels();
+      return await listModels(euOnly ? { region: 'eu' } : {});
     } catch (error) {
       logger.warn({ err: error }, 'could not load the OpenRouter model list');
       return [];
@@ -95,21 +102,53 @@ export function createAdminRouter({
     assistant: Assistant,
     notice: { message?: string; error?: string } = {},
   ): Promise<string> {
-    const [models, settings, users, grantedUserIds] = await Promise.all([
-      modelChoices(),
+    const [settings, users, grantedUserIds] = await Promise.all([
       loadSettings(repo, config, assistant.id),
       repo.listUsers(),
       repo.listGrantedUserIds(assistant.id),
     ]);
+    const models = await modelChoices(settings.euOnly);
+
     return views.assistantPage(assistant, {
       ...notice,
       models,
       settings,
       effortLevels: EFFORT_LEVELS,
       maxSearchResults: MAX_SEARCH_RESULTS,
+      maxTemperature: MAX_TEMPERATURE,
+      maxTopP: MAX_TOP_P,
+      anonymizerConfigured: Boolean(config.presidio.url),
       users,
       grantedUserIds,
     });
+  }
+
+  /**
+   * Why this combination of settings cannot work, or null when it can.
+   *
+   * EU-only routing is resolved against OpenRouter's endpoint list for the
+   * chosen model; anonymization needs a Presidio service to exist at all. Both
+   * would otherwise fail on every message, with the admin nowhere near.
+   */
+  async function unusable(settings: AssistantSettings): Promise<string | null> {
+    if (settings.anonymize && !config.presidio.url) {
+      return 'Anonymizing messages needs a Presidio service. Set PRESIDIO_URL before switching this on.';
+    }
+
+    if (settings.euOnly) {
+      let tags: string[];
+      try {
+        tags = await euProviderTags(settings.model);
+      } catch (error) {
+        logger.warn({ err: error, model: settings.model }, 'could not resolve EU endpoints');
+        return 'OpenRouter could not be reached to check where this model is served. Try saving again in a moment.';
+      }
+      if (tags.length === 0) {
+        return 'No provider serves this model from the EU. Pick another model, or switch EU-only routing off.';
+      }
+    }
+
+    return null;
   }
 
   /** Resolves :id, answering with a 404 page when it is not an assistant. */
@@ -212,7 +251,20 @@ export function createAdminRouter({
       memory: checked(req.body, 'memory'),
       citations: checked(req.body, 'citations'),
       compaction: checked(req.body, 'compaction'),
+      euOnly: checked(req.body, 'eu_only'),
+      anonymize: checked(req.body, 'anonymize'),
+      temperature: parseSampling(text(req.body, 'temperature'), MAX_TEMPERATURE),
+      topP: parseSampling(text(req.body, 'top_p'), MAX_TOP_P),
     };
+
+    // Say no here rather than on the first message. The two settings that can
+    // be saved into an unusable combination are checked against the outside
+    // world now, while an admin is looking at the page and can fix it.
+    const complaint = await unusable(settings);
+    if (complaint) {
+      res.status(400).type('html').send(await renderAssistant(assistant, { error: complaint }));
+      return;
+    }
 
     await saveSettings(repo, assistant.id, settings);
     logger.info({ by: req.user!.id, assistantId: assistant.id, model }, 'assistant settings changed');

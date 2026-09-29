@@ -88,7 +88,7 @@ export async function rememberExchange(
 
   try {
     const raw = await chat.complete({
-      model: settings.model,
+      settings,
       system: EXTRACTION_SYSTEM,
       user: `User said:\n${question}\n\nAssistant replied:\n${answer}`,
       maxTokens: EXTRACTION_MAX_TOKENS,

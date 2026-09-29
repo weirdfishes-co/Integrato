@@ -156,11 +156,11 @@ File names may only contain letters, digits, `-` and `_` and must end in `.md` �
 the same character range that works in a placeholder. Maximum 512 kB per
 document.
 
-**Where those files land** is decided by `CONTEXT_DIR` and `INSTRUCTIONS_PATH`.
-Locally these default to the files in the repo. In the Docker image they live in
-`/data` — so on the Railway volume, because otherwise every admin change would
-disappear on the next deploy. If that location is still empty, the bundled files
-are copied there once; existing content is never overwritten.
+**Where those files land** is decided by `ASSISTANTS_DIR`, under which each
+assistant gets `<slug>/instr.md` and `<slug>/context/`. In the Docker image it
+points at `/data` — so at the Railway volume, because otherwise every admin
+change would disappear on the next deploy. A newly created assistant is seeded
+there from the bundled files once; existing content is never overwritten.
 
 ## Running on free models
 
@@ -193,7 +193,9 @@ The chat screen names the cause rather than showing one generic error:
 | --- | --- |
 | …too little credit for this request | Add credit at OpenRouter, or lower `MODEL_MAX_TOKENS` |
 | The OpenRouter key was rejected | Check `OPENROUTER_API_KEY` in the environment |
-| This model is not available on OpenRouter | Pick another model on the assistant's page |
+| This model is not available on OpenRouter, or not from the region… | Pick another model, or switch EU-only routing off |
+| …no Presidio service is configured | Set `PRESIDIO_URL`, or switch anonymization off |
+| …may only use providers in the EU, and this model has none | Pick a model with a European endpoint |
 | Too many requests at once | Wait a moment and retry |
 | The model provider is unavailable | Retry shortly; the fault is upstream |
 
@@ -232,6 +234,9 @@ restart, no redeploy.
 | **Show thinking** | Streams the model's reasoning above the answer, collapsed |
 | **Web search** | Look things up beyond the knowledge base; billed per search |
 | **Domain limits** | Restrict search to, or exclude, specific domains |
+| **Temperature / Top-P** | How freely the model picks its words. Empty = the model's own default |
+| **EU-only routing** | Restrict every request to providers serving from an EU/EEA data centre |
+| **Anonymization** | Replace personal data with placeholders before a message leaves |
 | **Memory** | Remember durable facts about a user across their conversations |
 | **Citations** | Ask the assistant to mark which document a statement came from |
 | **Compaction** | Summarize long threads instead of dropping the oldest messages |
@@ -261,6 +266,72 @@ is worth knowing when judging how reliable they are:
 these domains" to blacklist — one per line, wildcards allowed (`*.substack.com`).
 Some search engines accept only one of the two lists, so the whitelist wins when
 both are filled in. Google's engine ignores domain filtering entirely.
+
+### Temperature and Top-P
+
+Both are **empty by default, and empty is not zero**: nothing is sent and the
+model uses the default its provider tuned. That matters — several reasoning
+models reject a temperature outright, and a picked-at-random 0.7 would be a
+worse answer than no answer to the question.
+
+Temperature runs 0–2, Top-P 0–1. Convention is to set one or the other, not
+both. When the chosen model supports neither, the page says so under the fields
+rather than letting you wonder why nothing changed.
+
+The two settings apply to the **answer only**. Memory extraction and compaction
+keep the model's defaults: a temperature chosen to make a chatbot livelier has
+no business loosening a fact-extraction call.
+
+### EU-only routing
+
+OpenRouter serves most models from several places — `azure/eu`,
+`amazon-bedrock/eu-west-1`, `google-vertex/europe` are separate endpoints from
+their American siblings. With this on:
+
+- the **model picker** shows only models OpenRouter can serve from Europe
+  (~70 of ~460), asked for with its own `region=eu` filter
+- **every request** carries the European endpoint tags for that model with
+  fallbacks switched off, so OpenRouter may not route elsewhere when they are
+  busy — it refuses instead
+- **saving is refused** if no European provider serves the model you picked,
+  with the reason on the page, rather than failing later on every message
+
+An endpoint tagged `global` does not count. It includes Europe but is not
+limited to it, which is the whole question being asked here.
+
+This is about where the request is *served*. It says nothing about where
+OpenRouter itself sits, and nothing about a provider's own retention policy.
+
+### Anonymization
+
+With this on, a user's messages are run through
+[Microsoft Presidio](https://microsoft.github.io/presidio/) before they leave:
+names, addresses, phone numbers, bank details and the like are replaced with
+placeholders (`<PERSON_1>`, `<EMAIL_ADDRESS_1>`). One value keeps one
+placeholder across a conversation, so the model can still tell two people apart.
+
+Set `PRESIDIO_URL` to a running **presidio-analyzer** — only that one service,
+because the substitution is done in this app. Without it the toggle is disabled
+on the admin page.
+
+```bash
+docker run -d --name presidio -p 5002:3000 mcr.microsoft.com/presidio-analyzer:latest
+# PRESIDIO_URL=http://localhost:5002
+```
+
+Three things to know before switching it on:
+
+- **It fails closed.** If Presidio is unreachable or errors, the message is not
+  sent and the user sees why. That is deliberate: sending the text unprotected
+  is the one outcome this setting exists to prevent.
+- **The original is still stored here.** Only the copy going to the model is
+  rewritten — your own database keeps what the user typed.
+- **The answer comes back in placeholders.** Ask "what should I mail Ann?" and
+  the reply discusses `<PERSON_1>`. Nothing substitutes them back yet.
+
+The knowledge base and the system prompt are *not* anonymized: they are the
+admin's own text, and rewriting them would cost the prompt cache on every
+request.
 
 ## Choosing the model
 

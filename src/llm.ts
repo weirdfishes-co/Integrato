@@ -2,12 +2,22 @@ import OpenAI from 'openai';
 
 import type { Config, Effort } from './config.js';
 import type { Role } from './db/repo.js';
+import { logger } from './logger.js';
+import { euProviderTags } from './models.js';
+import type { Anonymizer } from './presidio.js';
+import { AnonymizationError } from './presidio.js';
 import type { AssistantSettings } from './settings.js';
 
 /**
  * Chat completions through OpenRouter, which speaks the OpenAI wire format for
  * every model it offers. Everything an admin can change (model, reasoning
- * depth, web search) travels with the request rather than with the client.
+ * depth, web search, sampling) travels with the request rather than with the
+ * client.
+ *
+ * Two of those settings are promises to the user rather than preferences, so
+ * they are applied *here*, at the one point where a request is built, and not
+ * by the callers: EU-only routing and anonymization. A caller that forgot
+ * either one would not fail — it would quietly send the data anyway.
  */
 
 const BASE_URL = 'https://openrouter.ai/api/v1';
@@ -46,14 +56,26 @@ export interface ChatClient {
   stream(request: ChatRequest, events: ChatEvents): Promise<ChatResult>;
   /**
    * One-shot, non-streaming call used for background work (memory extraction,
-   * compaction) where no user is watching.
+   * compaction) where no user is watching. It takes the whole settings object
+   * rather than just a model id because this text is the user's too: it has to
+   * be anonymized and routed exactly like the conversation it came from.
    */
-  complete(request: { model: string; system: string; user: string; maxTokens: number }): Promise<string>;
+  complete(request: {
+    settings: AssistantSettings;
+    system: string;
+    user: string;
+    maxTokens: number;
+  }): Promise<string>;
 }
 
 /** Thrown when the provider declined to answer, so the route can say so. */
 export class ChatRefusalError extends Error {
   readonly code = 'refusal';
+}
+
+/** Thrown when EU-only routing is on and no European endpoint serves the model. */
+export class RegionUnavailableError extends Error {
+  readonly code = 'region';
 }
 
 /**
@@ -65,6 +87,11 @@ export class ChatRefusalError extends Error {
  * anything from the provider's own message.
  */
 export function describeChatError(error: unknown): string {
+  // Both are ours and already carry a sentence written for a reader.
+  if (error instanceof RegionUnavailableError || error instanceof AnonymizationError) {
+    return error.message;
+  }
+
   const status = error instanceof OpenAI.APIError ? error.status : undefined;
 
   switch (status) {
@@ -74,7 +101,10 @@ export function describeChatError(error: unknown): string {
     case 402:
       return 'The OpenRouter account has too little credit for this request. An administrator needs to add credit, or lower MODEL_MAX_TOKENS.';
     case 404:
-      return 'This model is not available on OpenRouter. An administrator can pick another one on the admin page.';
+      // Also what an impossible EU-only request looks like: OpenRouter answers
+      // 404 when provider.only leaves no endpoint, which is the fail-closed
+      // behaviour that setting relies on.
+      return 'This model is not available on OpenRouter, or not from the region this chatbot is restricted to. An administrator can pick another one on the admin page.';
     case 429:
       return 'Too many requests at once, or the model is rate limited. Please try again in a moment.';
     case 502:
@@ -104,10 +134,18 @@ interface OpenRouterParams extends OpenAI.ChatCompletionCreateParamsStreaming {
   cache_control?: { type: 'ephemeral' };
   reasoning?: ReasoningConfig;
   plugins?: WebPlugin[];
+  provider?: ProviderPreferences;
 }
 
 interface OpenRouterCompletionParams extends OpenAI.ChatCompletionCreateParamsNonStreaming {
   reasoning?: ReasoningConfig;
+  provider?: ProviderPreferences;
+}
+
+interface ProviderPreferences {
+  /** Endpoint tags, e.g. `azure/eu`. Anything else is refused with a 404. */
+  only?: string[];
+  allow_fallbacks?: boolean;
 }
 
 /** Reasoning text and search annotations ride along on the standard delta. */
@@ -135,6 +173,52 @@ function webPlugin(settings: AssistantSettings): WebPlugin[] | undefined {
   return [plugin];
 }
 
+/**
+ * The tags a request may route through when the chatbot is EU-only, or
+ * undefined when it is not restricted.
+ *
+ * `allow_fallbacks: false` is the point of the exercise: without it OpenRouter
+ * is free to fall back to any other endpoint when the European ones are busy,
+ * which is exactly the case the setting exists to prevent.
+ */
+async function providerPreferences(
+  settings: AssistantSettings,
+): Promise<ProviderPreferences | undefined> {
+  if (!settings.euOnly) return undefined;
+
+  let tags: string[];
+  try {
+    tags = await euProviderTags(settings.model);
+  } catch (error) {
+    // Unknown is not the same as none, but it has to be treated the same way:
+    // sending the request unrestricted would break the promise silently.
+    logger.error({ err: error, model: settings.model }, 'could not resolve EU endpoints');
+    throw new RegionUnavailableError(
+      'This chatbot may only use providers in the EU, and that could not be confirmed for this model right now, so nothing was sent. Please try again in a moment.',
+    );
+  }
+
+  if (tags.length === 0) {
+    throw new RegionUnavailableError(
+      'This chatbot may only use providers in the EU, and this model has none. An administrator can pick a different model on the admin page.',
+    );
+  }
+
+  return { only: tags, allow_fallbacks: false };
+}
+
+/**
+ * Sampling is sent only when an admin filled it in. An omitted field is not the
+ * same as a default we invent: the model's own default is usually tuned, and
+ * several reasoning models reject a temperature outright.
+ */
+function sampling(settings: AssistantSettings): { temperature?: number; top_p?: number } {
+  return {
+    ...(settings.temperature === null ? {} : { temperature: settings.temperature }),
+    ...(settings.topP === null ? {} : { top_p: settings.topP }),
+  };
+}
+
 function reasoningText(delta: OpenRouterDelta): string {
   if (typeof delta.reasoning === 'string' && delta.reasoning.length > 0) {
     return delta.reasoning;
@@ -144,7 +228,33 @@ function reasoningText(delta: OpenRouterDelta): string {
     .join('');
 }
 
-export function createChatClient(config: Config): ChatClient {
+export function createChatClient(config: Config, anonymizer?: Anonymizer): ChatClient {
+  /**
+   * The user's own words, pseudonymized when the chatbot asks for it. Only user
+   * turns: the system prompt is the admin's text and is the cached prefix of
+   * every request, so rewriting it would cost the prompt cache for nothing.
+   */
+  async function protect(
+    settings: AssistantSettings,
+    turns: readonly ChatTurn[],
+  ): Promise<ChatTurn[]> {
+    if (!settings.anonymize) return [...turns];
+    if (!anonymizer?.configured) {
+      throw new AnonymizationError(
+        'This chatbot anonymizes messages before sending them, but no Presidio service is configured. An administrator needs to set PRESIDIO_URL.',
+      );
+    }
+
+    const indexes = turns.flatMap((turn, index) => (turn.role === 'user' ? [index] : []));
+    const cleaned = await anonymizer.anonymizeBatch(indexes.map((index) => turns[index]!.content));
+
+    const result = [...turns];
+    indexes.forEach((index, position) => {
+      result[index] = { role: 'user', content: cleaned[position] ?? turns[index]!.content };
+    });
+    return result;
+  }
+
   const client = new OpenAI({
     apiKey: config.openRouterApiKey,
     baseURL: BASE_URL,
@@ -157,6 +267,11 @@ export function createChatClient(config: Config): ChatClient {
 
   return {
     async stream({ systemPrompt, history, settings, signal }, events) {
+      const [turns, provider] = await Promise.all([
+        protect(settings, history),
+        providerPreferences(settings),
+      ]);
+
       const params: OpenRouterParams = {
         model: settings.model,
         max_tokens: config.maxTokens,
@@ -164,9 +279,11 @@ export function createChatClient(config: Config): ChatClient {
         cache_control: { type: 'ephemeral' },
         reasoning: { effort: settings.effort, exclude: !settings.showThinking },
         plugins: webPlugin(settings),
+        ...sampling(settings),
+        ...(provider ? { provider } : {}),
         messages: [
           { role: 'system', content: systemPrompt },
-          ...history.map((turn) => ({ role: turn.role, content: turn.content })),
+          ...turns.map((turn) => ({ role: turn.role, content: turn.content })),
         ],
       };
 
@@ -215,16 +332,24 @@ export function createChatClient(config: Config): ChatClient {
       return { answer, sources };
     },
 
-    async complete({ model, system, user, maxTokens }) {
+    async complete({ settings, system, user, maxTokens }) {
+      const [turns, provider] = await Promise.all([
+        protect(settings, [{ role: 'user', content: user }]),
+        providerPreferences(settings),
+      ]);
+
       // Background work needs an answer, not reasoning. Some models otherwise
-      // write their chain of thought straight into the content.
+      // write their chain of thought straight into the content. It also keeps
+      // the model's default sampling: a temperature chosen to make a chatbot
+      // livelier has no business loosening a fact-extraction call.
       const params: OpenRouterCompletionParams = {
-        model,
+        model: settings.model,
         max_tokens: maxTokens,
         reasoning: { enabled: false, exclude: true },
+        ...(provider ? { provider } : {}),
         messages: [
           { role: 'system', content: system },
-          { role: 'user', content: user },
+          { role: 'user', content: turns[0]?.content ?? user },
         ],
       };
 
