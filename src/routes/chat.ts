@@ -55,9 +55,9 @@ export function createChatRouter({ config, repo, auth, chat, views }: ChatRouteD
 
     if (!assistant || !(await repo.canUseAssistant(user.id, user.isAdmin, assistant.id))) {
       if (req.path.startsWith('/api/')) {
-        res.status(404).json({ error: 'Coachbot not found' });
+        res.status(404).json({ error: 'Chatbot not found' });
       } else {
-        res.status(404).type('html').send(views.errorPage(404, 'This coachbot does not exist.'));
+        res.status(404).type('html').send(views.errorPage(404, 'This chatbot does not exist.'));
       }
       return null;
     }

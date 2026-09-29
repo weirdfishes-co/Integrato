@@ -117,7 +117,7 @@ export function createAdminRouter({
     const id = Number.parseInt(String(req.params.id ?? ''), 10);
     const assistant = Number.isInteger(id) ? await repo.findAssistantById(id) : null;
     if (!assistant) {
-      res.status(404).type('html').send(views.errorPage(404, 'This coachbot does not exist.'));
+      res.status(404).type('html').send(views.errorPage(404, 'This chatbot does not exist.'));
       return null;
     }
     return assistant;
@@ -137,7 +137,7 @@ export function createAdminRouter({
         res
           .status(400)
           .type('html')
-          .send(await renderAdmin(req, { error: 'Give the coachbot a name.' }));
+          .send(await renderAdmin(req, { error: 'Give the chatbot a name.' }));
         return;
       }
 

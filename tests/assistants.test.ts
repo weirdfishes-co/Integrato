@@ -156,7 +156,7 @@ describe('the welcome message', () => {
     expect((await repo.findAssistantById(coach.id))?.welcome).toBe(welcome);
   });
 
-  it('is kept per coachbot', async () => {
+  it('is kept per chatbot', async () => {
     const coach = await repo.createAssistant('coach', 'Coach', '', 'English');
     const hr = await repo.createAssistant('hr', 'HR', '', 'English');
 

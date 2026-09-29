@@ -164,7 +164,7 @@ context/*.md         knowledge base seeded into a brand-new assistant
   second transport that only works in one environment is a second way to fail,
   and `nodemailer` went with it. Without a key, outside production, the link is
   written to the log instead.
-- **A coachbot's identity is a row; its behaviour is settings.** Name,
+- **A chatbot's identity is a row; its behaviour is settings.** Name,
   description, answer language and the welcome message live on the `assistants`
   row and are edited together; the model and the feature toggles live in
   `assistant_settings`. That split is why the welcome message became migration
@@ -190,7 +190,7 @@ context/*.md         knowledge base seeded into a brand-new assistant
 - **Knowledge base on the volume, not in the image.** An admin edits `instr.md`
   and the context documents through the web page, which only works durably when
   the files live outside the image — hence `ASSISTANTS_DIR=/data/assistants`.
-  A new coachbot is seeded from the bundled `instr.md` and `context/`;
+  A new chatbot is seeded from the bundled `instr.md` and `context/`;
   `seedContent()` never overwrites existing content.
 - **Uploads as JSON, not multipart.** The browser reads the `.md` file with
   `file.text()` and POSTs it as JSON — saves a multer dependency for what is
@@ -213,20 +213,34 @@ context/*.md         knowledge base seeded into a brand-new assistant
   two roles rather than sharing one. Two places cannot follow the button colour,
   both for contrast: in dark mode the brown sits at 2.04:1 against the ink
   ground, so it lightens to `#a35a09`; and the sidebar's new-conversation button
-  sits on the blue, where the brown is 1.23:1, so it takes a white fill instead.
+  sits on the blue, where the brown is 1.44:1, so it takes a white fill instead.
   **Check contrast before changing any of these** — several pairings here are
   chosen, not inherited.
-- **Controls size themselves.** STYLE.md puts body copy at 20px, which is right
-  for prose and far too big for a form. Buttons, fields and tables set their own
-  size rather than inheriting it; a table matches the links inside it.
+- **A link is bold and coloured, not underlined** — except inside a sentence.
+  `.link` (the rows of actions, the breadcrumbs, the names in a table) carries
+  its affordance in weight and colour, because it stands alone with no prose to
+  blend into. A bare `<a>` in running text keeps the browser's underline, since
+  bold blue alone is not enough to pick it out of a paragraph. On the sidebar
+  the same rule holds in white; there hover has no colour left to move to, so
+  it is the one place that underlines.
+- **The sidebar is a lighter step of the blue** (`--sidebar-bg`, `#1a6b9c`; the
+  deep navy in dark mode). White on it is 5.79:1, which is what keeps the bold
+  white links AA — do not lighten it further. Conversation rows have **no hover
+  fill**: only the row you are in is marked, and a second highlight following
+  the pointer made the list restless. The pointer still reveals that row's
+  delete button, which is the affordance that mattered.
+- **Controls size themselves, and so does a chat message.** STYLE.md puts body
+  copy at 20px, which is right for prose and far too big for a form or a long
+  answer. Buttons, fields, tables and `.message` set their own size rather than
+  inheriting it; a table matches the links inside it.
 - **Fonts are self-hosted** from `public/fonts/` (Montserrat 700, Lato 400/700,
   65 kB). No CDN request, and it works offline. There is no logo: the product
   name is set as text, which is also why the sign-in email carries no image at
   all and so does not depend on a client allowing them.
-- **"Coachbot" is the word users see; "assistant" is the word the code uses.**
+- **"Chatbot" is the word users see; "assistant" is the word the code uses.**
   The table, the `assistant_id` columns, `AssistantSettings` and the routes all
   say assistant. Renaming those is churn no reader benefits from — keep new
-  user-facing text on "coachbot" and leave the identifiers alone.
+  user-facing text on "chatbot" and leave the identifiers alone.
 - **Views are built by a factory** (`createViews`), not free functions, so the
   product name reaches every page without a module-level global. Routers
   take `views` as a dependency, matching the `createX(deps)` idiom used

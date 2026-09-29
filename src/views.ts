@@ -85,7 +85,7 @@ function balancePanel(balance: Balance | null | undefined): string {
   if (balance === null) {
     return `      <section class="panel">
         <h2>OpenRouter balance</h2>
-        <p class="muted small">Could not reach OpenRouter. The balance is unavailable; the coachbot itself may still work.</p>
+        <p class="muted small">Could not reach OpenRouter. The balance is unavailable; the chatbot itself may still work.</p>
       </section>`;
   }
 
@@ -279,7 +279,7 @@ ${passwordField}
         <div class="sidebar__foot">
           <span class="muted small" title="${escapeHtml(user.email)}">${escapeHtml(user.email)}</span>
           <div class="row">
-            ${showBackToPicker ? '<a class="link small" href="/">Coachbots</a>' : ''}
+            ${showBackToPicker ? '<a class="link small" href="/">Chatbots</a>' : ''}
             ${user.isAdmin ? '<a class="link small" href="/admin">Admin</a>' : ''}
             <form method="post" action="/logout"><button type="submit" class="link small">Sign out</button></form>
           </div>
@@ -307,7 +307,7 @@ ${passwordField}
     pickerPage(user, assistants) {
       const cards =
         assistants.length === 0
-          ? `        <p class="muted">You do not have access to a coachbot yet. Ask an administrator to give you access.</p>`
+          ? `        <p class="muted">You do not have access to a chatbot yet. Ask an administrator to give you access.</p>`
           : `        <ul class="picker">
 ${assistants
   .map(
@@ -326,12 +326,12 @@ ${assistants
         </ul>`;
 
       return layout({
-        title: `Coachbots — ${assistantName}`,
+        title: `Chatbots — ${assistantName}`,
         body: `    <main class="page page--picker">
       <header class="page__head">
         <div class="page__brand">
           <p class="wordmark wordmark--small">${assistantName}</p>
-          <h1>Choose a coachbot</h1>
+          <h1>Choose a chatbot</h1>
         </div>
         <div class="row">
           ${user.isAdmin ? '<a class="link" href="/admin">Admin</a>' : ''}
@@ -364,7 +364,7 @@ ${cards}
       const assistants = options.assistants ?? [];
       const assistantRows =
         assistants.length === 0
-          ? `          <tr><td colspan="3" class="muted">No coachbots yet. Create the first one below.</td></tr>`
+          ? `          <tr><td colspan="3" class="muted">No chatbots yet. Create the first one below.</td></tr>`
           : assistants
               .map(
                 (assistant) => `          <tr>
@@ -387,7 +387,7 @@ ${cards}
       <header class="page__head">
         <h1>Administration</h1>
         <div class="row">
-          <a class="link" href="/">← Coachbots</a>
+          <a class="link" href="/">← Chatbots</a>
           <form method="post" action="/logout"><button type="submit" class="link">Sign out</button></form>
         </div>
       </header>
@@ -396,8 +396,8 @@ ${cards}
 ${balancePanel(options.balance)}
 
       <section class="panel">
-        <h2>Coachbots</h2>
-        <p class="muted small">Each coachbot has its own knowledge base, settings and users.</p>
+        <h2>Chatbots</h2>
+        <p class="muted small">Each chatbot has its own knowledge base, settings and users.</p>
         <table class="table">
           <thead><tr><th>Name</th><th>Address</th><th></th></tr></thead>
           <tbody>
@@ -407,14 +407,14 @@ ${assistantRows}
 
         <form method="post" action="/admin/assistants" class="row row--form">
           <label class="visually-hidden" for="new-assistant">Name</label>
-          <input id="new-assistant" name="name" type="text" required placeholder="New coachbot name">
+          <input id="new-assistant" name="name" type="text" required placeholder="New chatbot name">
           <button type="submit" class="secondary">Create</button>
         </form>
       </section>
 
       <section class="panel">
         <h2>Users</h2>
-        <p class="muted small">Admins may use every coachbot. Other users are granted access per coachbot.</p>
+        <p class="muted small">Admins may use every chatbot. Other users are granted access per chatbot.</p>
         <form method="post" action="/admin/users" class="row row--form">
           <label class="visually-hidden" for="new-email">Email address</label>
           <input id="new-email" name="email" type="email" required placeholder="new@example.com">
@@ -475,7 +475,7 @@ ${(options.effortLevels ?? [])
                 ? '<span class="muted small">admin — always allowed</span>'
                 : `<label class="checkbox"><input type="checkbox" name="user" value="${user.id}"${
                     granted.has(user.id) ? ' checked' : ''
-                  }> may use this coachbot</label>`
+                  }> may use this chatbot</label>`
             }</td>
           </tr>`,
         )
@@ -523,8 +523,8 @@ ${(options.effortLevels ?? [])
       </section>
 
       <section class="panel">
-        <h2>Coachbot settings</h2>
-        <p class="muted small">Applies to this coachbot only, from the next message on.</p>
+        <h2>Chatbot settings</h2>
+        <p class="muted small">Applies to this chatbot only, from the next message on.</p>
         <form method="post" action="/admin/assistants/${assistant.id}/settings" class="settings">
 
           <div class="field">
@@ -549,7 +549,7 @@ ${(options.effortLevels ?? [])
             <input type="checkbox" name="web_search" value="1"${settings?.webSearch ? ' checked' : ''}>
             Web search
           </label>
-          <p class="muted small">Lets the coachbot look things up beyond the knowledge base. Billed per search on top of the model.</p>
+          <p class="muted small">Lets the chatbot look things up beyond the knowledge base. Billed per search on top of the model.</p>
 
           <div class="field">
             <label for="web_search_max_results">Results per search</label>
@@ -581,13 +581,13 @@ ${(options.effortLevels ?? [])
             <input type="checkbox" name="memory" value="1"${settings?.memory ? ' checked' : ''}>
             Remember users across conversations
           </label>
-          <p class="muted small">Facts are remembered per user <em>and</em> per coachbot, so nothing crosses between coachbots.</p>
+          <p class="muted small">Facts are remembered per user <em>and</em> per chatbot, so nothing crosses between chatbots.</p>
 
           <label class="checkbox">
             <input type="checkbox" name="citations" value="1"${settings?.citations ? ' checked' : ''}>
             Cite knowledge-base documents
           </label>
-          <p class="muted small">The coachbot marks which document a statement came from, like [Guidelines.md].</p>
+          <p class="muted small">The chatbot marks which document a statement came from, like [Guidelines.md].</p>
 
           <label class="checkbox">
             <input type="checkbox" name="compaction" value="1"${settings?.compaction ? ' checked' : ''}>
@@ -600,7 +600,7 @@ ${(options.effortLevels ?? [])
       </section>
 
       <section class="panel">
-        <h2>Who may use this coachbot</h2>
+        <h2>Who may use this chatbot</h2>
         <form method="post" action="/admin/assistants/${assistant.id}/users">
           <table class="table">
             <thead><tr><th>Email</th><th>Access</th></tr></thead>
@@ -614,10 +614,10 @@ ${userRows}
 
       <section class="panel">
         <h2>Delete</h2>
-        <p class="muted small">Removes this coachbot with every conversation, memory and setting belonging to it. Its knowledge-base files stay on disk.</p>
+        <p class="muted small">Removes this chatbot with every conversation, memory and setting belonging to it. Its knowledge-base files stay on disk.</p>
         <form method="post" action="/admin/assistants/${assistant.id}/delete"
               onsubmit="return confirm('Delete ${escapeHtml(assistant.name)} and all its conversations?')">
-          <button type="submit" class="danger">Delete this coachbot</button>
+          <button type="submit" class="danger">Delete this chatbot</button>
         </form>
       </section>
     </main>`,

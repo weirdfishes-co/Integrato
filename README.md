@@ -86,6 +86,16 @@ Three things STYLE.md's source does not provide were decided here and are marked
 in the stylesheet: hover colours, a status palette for errors and confirmations,
 and a dark theme. Every colour pairing clears WCAG AA.
 
+Two conventions are worth knowing before you change anything:
+
+- **Links are bold and coloured rather than underlined**, because most of them
+  stand alone — a row of actions, a breadcrumb, a name in a table. A link
+  *inside* a sentence keeps its underline, since weight and colour alone do not
+  pick it out of a paragraph.
+- **The sidebar runs on a lighter step of the brand blue**, with bold white
+  links on it. Its rows have no hover fill: the conversation you are in is the
+  only one marked, and hovering a row reveals its delete button instead.
+
 ## Assistants
 
 An admin creates assistants on **`/admin`**. Each one gets:
@@ -217,7 +227,7 @@ restart, no redeploy.
 | Setting | What it does |
 | --- | --- |
 | **Model** | Any model OpenRouter offers, with context size and price shown |
-| **Identity** | The coachbot's name, description, answer language and welcome message |
+| **Identity** | The chatbot's name, description, answer language and welcome message |
 | **Reasoning effort** | `low` … `max`. Models without reasoning support ignore it |
 | **Show thinking** | Streams the model's reasoning above the answer, collapsed |
 | **Web search** | Look things up beyond the knowledge base; billed per search |
