@@ -194,7 +194,6 @@ The chat screen names the cause rather than showing one generic error:
 | …too little credit for this request | Add credit at OpenRouter, or lower `MODEL_MAX_TOKENS` |
 | The OpenRouter key was rejected | Check `OPENROUTER_API_KEY` in the environment |
 | This model is not available on OpenRouter, or not from the region… | Pick another model, or switch EU-only routing off |
-| …no Presidio service is configured | Set `PRESIDIO_URL`, or switch anonymization off |
 | …may only use providers in the EU, and this model has none | Pick a model with a European endpoint |
 | Too many requests at once | Wait a moment and retry |
 | The model provider is unavailable | Retry shortly; the fault is upstream |
@@ -304,30 +303,43 @@ OpenRouter itself sits, and nothing about a provider's own retention policy.
 
 ### Anonymization
 
-With this on, a user's messages are run through
-[Microsoft Presidio](https://microsoft.github.io/presidio/) before they leave:
-names, addresses, phone numbers, bank details and the like are replaced with
-placeholders (`<PERSON_1>`, `<EMAIL_ADDRESS_1>`). One value keeps one
-placeholder across a conversation, so the model can still tell two people apart.
+With this on, a user's message is rewritten before it goes to the model:
 
-Set `PRESIDIO_URL` to a running **presidio-analyzer** — only that one service,
-because the substitution is done in this app. Without it the toggle is disabled
-on the admin page.
+| Recognized | How it is verified |
+| --- | --- |
+| Email address | pattern |
+| IBAN | mod-97 check — a string that passes *is* an IBAN |
+| Card number | Luhn check, 13–19 digits |
+| BSN | Dutch 11-proef |
+| Phone number | shape: a country code or trunk zero, 9–15 digits |
+| IP address | pattern |
+| Dutch postcode | four digits and two capitals |
 
-```bash
-docker run -d --name presidio -p 5002:3000 mcr.microsoft.com/presidio-analyzer:latest
-# PRESIDIO_URL=http://localhost:5002
-```
+Each becomes a placeholder — `<IBAN_1>`, `<EMAIL_ADDRESS_2>` — and **one value
+keeps one placeholder for the whole conversation**, so the model can still tell
+two accounts or two addresses apart.
 
-Three things to know before switching it on:
+It needs no configuration and no service: it runs in this process, so there is
+nothing to deploy, nothing to reach over the network and nothing to fail.
 
-- **It fails closed.** If Presidio is unreachable or errors, the message is not
-  sent and the user sees why. That is deliberate: sending the text unprotected
-  is the one outcome this setting exists to prevent.
+**It does not catch names.** Recognizing that "Priya Raghunathan" is a person
+needs a trained model, and no regular expression does it. That is a deliberate
+choice rather than an oversight: the pure-JavaScript alternative is a name
+lexicon, which finds the names it has seen and misses the rest *silently* —
+disproportionately non-Western names. For a privacy control, a gap you can see
+beats a gap you cannot.
+
+Everything it does find, it finds exactly. Every rule above has a checksum or a
+strict shape behind it, and it is tested against the false positives that
+matter: years ("between 2019 and 2024 we doubled"), order numbers, KvK numbers,
+prices, version strings, ISBNs and room numbers all pass through untouched.
+
+Two more things to know:
+
 - **The original is still stored here.** Only the copy going to the model is
   rewritten — your own database keeps what the user typed.
-- **The answer comes back in placeholders.** Ask "what should I mail Ann?" and
-  the reply discusses `<PERSON_1>`. Nothing substitutes them back yet.
+- **The answer comes back in placeholders.** Ask "which account was that?" and
+  the reply discusses `<IBAN_1>`. Nothing substitutes them back yet.
 
 The knowledge base and the system prompt are *not* anonymized: they are the
 admin's own text, and rewriting them would cost the prompt cache on every

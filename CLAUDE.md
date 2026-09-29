@@ -44,7 +44,7 @@ src/
   settings.ts        admin-controlled runtime settings, per assistant
   assistants.ts      slugs, per-assistant paths, first-run migration
   balance.ts         OpenRouter credit + key-limit status for /admin
-  presidio.ts        pseudonymizes user text through Presidio's analyzer
+  anonymize.ts       masks personal data in user text, in-process
   memory.ts          cross-conversation memory: extraction + prompt section
   compaction.ts      summarizes old turns once a conversation gets long
   content.ts         read/write the knowledge base + path validation + seeding
@@ -176,16 +176,34 @@ context/*.md         knowledge base seeded into a brand-new assistant
   The picker uses OpenRouter's own `?region=eu` catalogue (~70 models of ~460),
   and the admin route refuses to *save* a combination that has no EU endpoint,
   so the failure lands on the admin who caused it and not on every user.
-- **Anonymization uses Presidio's analyzer only**, not presidio-anonymizer. The
-  analyzer says where the personal data is and the substitution happens in
-  `presidio.ts`, which halves the infrastructure and buys the thing a plain
-  replace operator cannot do: one value keeps one placeholder (`<PERSON_1>`),
-  so the model can still tell two people apart. A conversation is analyzed in
-  **one** call — the texts are joined by a separator and the spans mapped back
-  by offset — because one call per message would be 40 on a long thread.
-  It **fails closed**: no service, an error, a hung request, and the message is
-  not sent. Only user turns are rewritten; the system prompt is the admin's own
-  text and is the cached prefix of every request.
+- **Anonymization runs in this process, and catches no names.** `anonymize.ts`
+  is patterns plus checksums — mod-97 for an IBAN, Luhn for a card, the 11-proef
+  for a BSN — so it needs no service, no model, no network call and no error
+  path. It cannot recognize a name, and the admin page says so.
+  **That gap is the design, not a todo.** It was weighed against the two
+  alternatives and both were rejected: Presidio (built first, then removed)
+  needs a Python service whose stock image is English-only, and `compromise`
+  works off a name lexicon — measured here, it found "Ann Smith", "Jeroen van
+  der Berg" and "De Vries" but missed "Priya Raghunathan", which is the failure
+  mode that disqualifies it. A privacy control that fails invisibly, and fails
+  hardest on non-Western names, is worse than one with a stated limit.
+  `transformers.js` would work but brings back a native module (`onnxruntime`),
+  ~400 MB of RAM and a model to cache on the volume.
+  One value keeps one placeholder across the batch, so a conversation is
+  anonymized in one call and the model can follow the thread. Only user turns
+  are rewritten; the system prompt is the admin's own text and is the cached
+  prefix of every request.
+- **The recognizers are a net, not a classifier.** Overlaps are settled by
+  priority (email > IBAN > card > BSN > phone > IP > postcode), because an
+  IBAN's digits are also card-shaped and phone-shaped and carving one account
+  number into three placeholders would be worse than any of them. A *rejected*
+  IBAN is not thereby innocent either — its digits can still be a phone number,
+  and are then masked as one. Where the shape is ambiguous, err towards masking:
+  a 9-digit number passes the 11-proef one time in eleven, so an order number
+  is occasionally masked, and that is the right direction for this setting.
+  Any new recognizer needs its false positives in `tests/privacy.test.ts` —
+  the years, prices, KvK numbers, ISBNs and room numbers already there are what
+  keeps this usable in ordinary prose.
 - **An empty sampling field is not zero.** `temperature` and `topP` are
   `number | null`, and null means "send nothing". A number we picked would be
   worse than the default the provider tuned, and several reasoning models reject
@@ -349,16 +367,11 @@ context/*.md         knowledge base seeded into a brand-new assistant
   hanging send leaves `POST /login` with no response — the user sees an endless
   spinner rather than an error. This is the same failure SMTP used to produce
   when its port was blocked.
-- **`PRESIDIO_LANGUAGE` is not the chatbot's answer language.** It selects the
-  analyzer's recognizers and its spaCy model, so it has to be a language the
-  *service* has installed — the stock image ships `en` only. A chatbot that
-  answers in Dutch still needs a Dutch-capable analyzer image before
-  `PRESIDIO_LANGUAGE=nl` finds anything, and an analyzer that finds nothing
-  fails silently in the only way that matters: the text goes out intact.
-- **Anonymization and EU routing are checked when an admin saves**, in
-  `unusable()` in `routes/admin.ts`. Without that the first user to send a
-  message discovers the misconfiguration, and the admin never sees it. Any new
-  setting that depends on something outside the app belongs in that function.
+- **EU-only routing is checked when an admin saves**, in `unusable()` in
+  `routes/admin.ts`. Without that the first user to send a message discovers the
+  misconfiguration and the admin never sees it. Any new setting that depends on
+  something outside the app belongs in that function — anonymization does not,
+  which is the point of it running in here.
 - **Never set `ASSISTANTS_DIR` to a relative path in a deployed environment.**
   The image points it at `/data`; a value copied from `.env` such as
   `./data/assistants` resolves inside `/app`, which the `node` user cannot

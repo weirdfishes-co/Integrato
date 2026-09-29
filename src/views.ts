@@ -158,8 +158,6 @@ export interface AssistantPageOptions extends NoticeOptions {
   maxSearchResults?: number;
   maxTemperature?: number;
   maxTopP?: number;
-  /** False when PRESIDIO_URL is unset, which makes the toggle unusable. */
-  anonymizerConfigured?: boolean;
   /** Every user, with a tick for those granted this assistant. */
   users?: readonly User[];
   grantedUserIds?: readonly number[];
@@ -480,11 +478,6 @@ ${(options.effortLevels ?? [])
           ? ' <strong>This model accepts neither setting</strong> — both are ignored for it.'
           : '';
 
-      const anonymizeHelp =
-        options.anonymizerConfigured === false
-          ? 'Unavailable: no Presidio service is configured. An administrator needs to set <code>PRESIDIO_URL</code>.'
-          : 'Names, addresses, phone numbers and the like are replaced with placeholders (<code>&lt;PERSON_1&gt;</code>) by Presidio before the message leaves. The original is still stored here, and the answer comes back written in terms of the placeholders.';
-
       const userRows = (options.users ?? [])
         .map(
           (user) => `          <tr>
@@ -626,12 +619,11 @@ ${(options.effortLevels ?? [])
           <p class="muted small">Restricts every request to endpoints served from an EU or EEA data centre, and forbids falling back to any other. The model list above then shows only models that have one.</p>
 
           <label class="checkbox">
-            <input type="checkbox" name="anonymize" value="1"${settings?.anonymize ? ' checked' : ''}${
-              options.anonymizerConfigured === false ? ' disabled' : ''
-            }>
+            <input type="checkbox" name="anonymize" value="1"${settings?.anonymize ? ' checked' : ''}>
             Anonymize messages before sending them
           </label>
-          <p class="muted small">${anonymizeHelp}</p>
+          <p class="muted small">Replaces email addresses, phone numbers, IBANs, card numbers, BSNs, IP addresses and Dutch postcodes with placeholders (<code>&lt;IBAN_1&gt;</code>) before a message leaves. The original stays stored here, and the answer comes back written in terms of the placeholders.</p>
+          <p class="muted small"><strong>It does not catch names.</strong> Recognizing a name needs a language model, which this runs without on purpose — every rule here is a pattern with a checksum, so it is exact about what it does find.</p>
 
           <hr>
 

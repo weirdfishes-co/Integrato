@@ -1,11 +1,10 @@
 import OpenAI from 'openai';
 
+import { anonymizeBatch } from './anonymize.js';
 import type { Config, Effort } from './config.js';
 import type { Role } from './db/repo.js';
 import { logger } from './logger.js';
 import { euProviderTags } from './models.js';
-import type { Anonymizer } from './presidio.js';
-import { AnonymizationError } from './presidio.js';
 import type { AssistantSettings } from './settings.js';
 
 /**
@@ -87,8 +86,8 @@ export class RegionUnavailableError extends Error {
  * anything from the provider's own message.
  */
 export function describeChatError(error: unknown): string {
-  // Both are ours and already carry a sentence written for a reader.
-  if (error instanceof RegionUnavailableError || error instanceof AnonymizationError) {
+  // Ours, and already carrying a sentence written for a reader.
+  if (error instanceof RegionUnavailableError) {
     return error.message;
   }
 
@@ -228,25 +227,21 @@ function reasoningText(delta: OpenRouterDelta): string {
     .join('');
 }
 
-export function createChatClient(config: Config, anonymizer?: Anonymizer): ChatClient {
+export function createChatClient(config: Config): ChatClient {
   /**
    * The user's own words, pseudonymized when the chatbot asks for it. Only user
    * turns: the system prompt is the admin's text and is the cached prefix of
    * every request, so rewriting it would cost the prompt cache for nothing.
+   *
+   * It runs in this process and cannot fail, which is why it needs no error
+   * path and no configuration — see `anonymize.ts` for what that buys and what
+   * it costs.
    */
-  async function protect(
-    settings: AssistantSettings,
-    turns: readonly ChatTurn[],
-  ): Promise<ChatTurn[]> {
+  function protect(settings: AssistantSettings, turns: readonly ChatTurn[]): ChatTurn[] {
     if (!settings.anonymize) return [...turns];
-    if (!anonymizer?.configured) {
-      throw new AnonymizationError(
-        'This chatbot anonymizes messages before sending them, but no Presidio service is configured. An administrator needs to set PRESIDIO_URL.',
-      );
-    }
 
     const indexes = turns.flatMap((turn, index) => (turn.role === 'user' ? [index] : []));
-    const cleaned = await anonymizer.anonymizeBatch(indexes.map((index) => turns[index]!.content));
+    const cleaned = anonymizeBatch(indexes.map((index) => turns[index]!.content));
 
     const result = [...turns];
     indexes.forEach((index, position) => {
@@ -267,10 +262,8 @@ export function createChatClient(config: Config, anonymizer?: Anonymizer): ChatC
 
   return {
     async stream({ systemPrompt, history, settings, signal }, events) {
-      const [turns, provider] = await Promise.all([
-        protect(settings, history),
-        providerPreferences(settings),
-      ]);
+      const turns = protect(settings, history);
+      const provider = await providerPreferences(settings);
 
       const params: OpenRouterParams = {
         model: settings.model,
@@ -333,10 +326,8 @@ export function createChatClient(config: Config, anonymizer?: Anonymizer): ChatC
     },
 
     async complete({ settings, system, user, maxTokens }) {
-      const [turns, provider] = await Promise.all([
-        protect(settings, [{ role: 'user', content: user }]),
-        providerPreferences(settings),
-      ]);
+      const turns = protect(settings, [{ role: 'user', content: user }]);
+      const provider = await providerPreferences(settings);
 
       // Background work needs an answer, not reasoning. Some models otherwise
       // write their chain of thought straight into the content. It also keeps

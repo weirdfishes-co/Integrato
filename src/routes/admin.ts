@@ -117,7 +117,6 @@ export function createAdminRouter({
       maxSearchResults: MAX_SEARCH_RESULTS,
       maxTemperature: MAX_TEMPERATURE,
       maxTopP: MAX_TOP_P,
-      anonymizerConfigured: Boolean(config.presidio.url),
       users,
       grantedUserIds,
     });
@@ -126,15 +125,12 @@ export function createAdminRouter({
   /**
    * Why this combination of settings cannot work, or null when it can.
    *
-   * EU-only routing is resolved against OpenRouter's endpoint list for the
-   * chosen model; anonymization needs a Presidio service to exist at all. Both
-   * would otherwise fail on every message, with the admin nowhere near.
+   * Only EU-only routing can be saved into an unusable state: it is resolved
+   * against OpenRouter's endpoint list for the chosen model, which would
+   * otherwise fail on every message with the admin nowhere near. Anonymization
+   * runs in this process and has nothing to be wrong about.
    */
   async function unusable(settings: AssistantSettings): Promise<string | null> {
-    if (settings.anonymize && !config.presidio.url) {
-      return 'Anonymizing messages needs a Presidio service. Set PRESIDIO_URL before switching this on.';
-    }
-
     if (settings.euOnly) {
       let tags: string[];
       try {

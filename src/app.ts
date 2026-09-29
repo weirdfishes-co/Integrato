@@ -10,7 +10,6 @@ import type { ContentPaths } from './content.js';
 import type { Db } from './db/index.js';
 import { createRepo, type Repo } from './db/repo.js';
 import { createChatClient } from './llm.js';
-import { createAnonymizer } from './presidio.js';
 import { logger } from './logger.js';
 import { createMailer } from './mail.js';
 import { createAdminRouter } from './routes/admin.js';
@@ -46,8 +45,7 @@ export function createApp(config: Config, db: Db): App {
   const repo = createRepo(db);
   const auth = createAuth(config, repo);
   const mailer = createMailer(config);
-  const anonymizer = createAnonymizer(config);
-  const chat = createChatClient(config, anonymizer);
+  const chat = createChatClient(config);
   const branding = {
     assistantName: config.assistantName,
     assistantLanguage: config.assistantLanguage,

@@ -29,17 +29,6 @@ function integer(env: Env, key: string, fallback: number): number {
   return parsed;
 }
 
-/** A 0..1 setting, e.g. a confidence threshold. */
-function ratio(env: Env, key: string, fallback: number): number {
-  const raw = env[key]?.trim();
-  if (!raw) return fallback;
-  const parsed = Number.parseFloat(raw);
-  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
-    throw new Error(`Environment variable ${key} must be a number between 0 and 1, got: ${raw}`);
-  }
-  return parsed;
-}
-
 function boolean(env: Env, key: string, fallback: boolean): boolean {
   const raw = env[key]?.trim().toLowerCase();
   if (!raw) return fallback;
@@ -113,23 +102,7 @@ export interface Config {
     readonly brevoApiKey: string | undefined;
     readonly from: string;
   };
-  /**
-   * Microsoft Presidio, used to strip personal data out of user messages before
-   * they leave for the model. It is a service of its own — only the analyzer is
-   * needed — so without a URL the per-chatbot toggle has nothing to call and
-   * refuses to run rather than sending the text unprotected.
-   */
-  readonly presidio: {
-    readonly url: string | undefined;
-    /**
-     * The language the analyzer runs in. It is not the chatbot's answer
-     * language: it selects the recognizers and the spaCy model, so it has to be
-     * one the service actually has installed.
-     */
-    readonly language: string;
-    /** Confidence floor; below it the analyzer starts guessing. */
-    readonly scoreThreshold: number;
-  };
+
 }
 
 export function loadConfig(env: Env = process.env): Config {
@@ -184,11 +157,6 @@ export function loadConfig(env: Env = process.env): Config {
     mail: {
       brevoApiKey,
       from: optional(env, 'MAIL_FROM', `${assistantName} <noreply@localhost>`),
-    },
-    presidio: {
-      url: env.PRESIDIO_URL?.trim().replace(/\/+$/, '') || undefined,
-      language: optional(env, 'PRESIDIO_LANGUAGE', 'en'),
-      scoreThreshold: ratio(env, 'PRESIDIO_SCORE_THRESHOLD', 0.5),
     },
   };
 }

@@ -117,11 +117,7 @@ describe('the chatbot settings form', () => {
   }
 
   function render(overrides: Partial<AssistantSettings> = {}, models = [model()]): string {
-    return views.assistantPage(assistant, {
-      settings: { ...settings, ...overrides },
-      models,
-      anonymizerConfigured: true,
-    });
+    return views.assistantPage(assistant, { settings: { ...settings, ...overrides }, models });
   }
 
   /* Empty, not 0: an unset knob has to reach the form as an empty field. */
@@ -152,17 +148,10 @@ describe('the chatbot settings form', () => {
   });
 
   /*
-   * The toggle is unusable without a service behind it, so it is disabled
-   * rather than left to fail on the first message.
+   * The gap has to be on the page, not only in the README: an admin switching
+   * this on will otherwise assume names are covered.
    */
-  it('disables anonymization when no Presidio service is configured', () => {
-    const html = views.assistantPage(assistant, {
-      settings,
-      models: [model()],
-      anonymizerConfigured: false,
-    });
-
-    expect(html).toContain('name="anonymize" value="1" disabled');
-    expect(html).toContain('PRESIDIO_URL');
+  it('says on the page that names are not caught', () => {
+    expect(render({ anonymize: true })).toContain('does not catch names');
   });
 });
