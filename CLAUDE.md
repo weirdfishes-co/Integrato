@@ -59,12 +59,12 @@ src/
     migrations/      forward-only .sql files
 public/              styles.css, app.js, upload.js (frontend, no build step)
 public/fonts/        Montserrat + Lato, self-hosted — no CDN font request
+STYLE.md             styleguide of record; public/styles.css implements it
 scripts/build.mjs    esbuild bundle to dist/ + copy migrations
 scripts/entrypoint.sh  takes ownership of /data, then drops to the node user
 tests/               vitest: auth, content, context, settings, features
                      (memory + compaction), views, mail, assistants
                      (slugs, rights matrix, isolation)
-STYLE.md             styleguide of record (Dev Ieffe); public/styles.css implements it
 instr.md             system prompt — the user owns its content
 instr.example.md     neutral starting prompt, safe to copy over instr.md
 context/*.md         knowledge base seeded into a brand-new assistant
@@ -164,6 +164,11 @@ context/*.md         knowledge base seeded into a brand-new assistant
   second transport that only works in one environment is a second way to fail,
   and `nodemailer` went with it. Without a key, outside production, the link is
   written to the log instead.
+- **A coachbot's identity is a row; its behaviour is settings.** Name,
+  description, answer language and the welcome message live on the `assistants`
+  row and are edited together; the model and the feature toggles live in
+  `assistant_settings`. That split is why the welcome message became migration
+  `002` rather than another settings key.
 - **One directory per assistant** under `ASSISTANTS_DIR`
   (`<slug>/instr.md`, `<slug>/context/*.md`). The slug is derived from the name
   once, at creation, and never changes — it is both the URL (`/<slug>`) and the
@@ -182,43 +187,48 @@ context/*.md         knowledge base seeded into a brand-new assistant
   `assistant_users` table is the rights matrix and holds no rows for admins —
   `canUseAssistant()` short-circuits on `isAdmin`. An assistant a user may not
   use answers **404, not 403**, so the list of assistant names does not leak.
-- **Upgrading from the single-assistant era happens once, at boot.**
-  `bootstrapAssistants()` creates an assistant from `ASSISTANT_NAME`, copies the
-  old global `settings` rows onto it, attaches every conversation and memory
-  that still has `assistant_id IS NULL`, grants it to all existing users and
-  seeds its knowledge base from the old location. Migration `004` deliberately
-  leaves those columns nullable so the SQL stays pure and nothing is lost.
-- **Knowledge base on the volume, not in the image.** `/admin/content` lets an
-  admin edit `instr.md` and the context documents. That only works durably when
-  the files live outside the image, so the image sets `CONTEXT_DIR=/data/context`
-  and `INSTRUCTIONS_PATH=/data/instr.md`. If the target location is empty,
-  `seedContent()` copies the bundled files there once; existing content is never
-  overwritten.
+- **Knowledge base on the volume, not in the image.** An admin edits `instr.md`
+  and the context documents through the web page, which only works durably when
+  the files live outside the image — hence `ASSISTANTS_DIR=/data/assistants`.
+  A new coachbot is seeded from the bundled `instr.md` and `context/`;
+  `seedContent()` never overwrites existing content.
 - **Uploads as JSON, not multipart.** The browser reads the `.md` file with
   `file.text()` and POSTs it as JSON — saves a multer dependency for what is
   always text.
-- **The picker's background is generated once, not per request.**
-  `buildBackgroundPaths()` in `views.ts` builds the circuit-board artwork at
-  module load and the picker reuses the string; it adds about 2 kB to that one
-  page. It is decoration: `aria-hidden`, `pointer-events: none`, and reduced to
-  a still, fully drawn board under `prefers-reduced-motion`. Animation is CSS
-  only — `pathLength="1"` normalises every trace so one keyframe set draws them
-  all — so no animation library is needed. Theme switching is done by
-  overriding `stroke`/`fill`/`filter` with the dark gradient and glow in a
-  `prefers-color-scheme` block, because `url(#id)` references cannot be themed
-  from the attribute alone.
-- **A background must not flicker.** The first attempt faded every line to zero
-  opacity on each cycle, which read as noise rather than motion. Keyframes here
-  keep a floor (0.25 and up) and end fully lit.
 - **Static assets carry a per-boot version** (`ASSET_VERSION` in `views.ts`,
   appended as `?v=` to the script and stylesheet URLs). `express.static` caches
-  them for an hour in production, so the deploy that moved the API to
-  `/api/a/:slug/...` left browsers running the previous `app.js` against the new
-  routes; it requested `/api/conversations`, hit the catch-all and reported
+  them for an hour in production, so the deploy that moved the API under a slug
+  left browsers running the previous `app.js` against the new routes; it
+  requested `/api/conversations`, hit the catch-all and reported
   "Loading failed: Not found". Any change to the frontend/API contract has the
   same failure mode, so leave the version in place.
-- **Views are built by a factory** (`createViews`), not free functions, so
-  `ASSISTANT_NAME` reaches every page without a module-level global. Routers
+- **The styling follows STYLE.md, through a token layer.** `public/styles.css`
+  binds semantic names (`--bg`, `--text`, `--accent`, …) to that palette, so a
+  restyle touches the tokens and the type scale and nothing below them. Three
+  things the guide's source does not have were decided here and are marked where
+  they appear: hover colours (darkened from their base), a status palette (the
+  source has no red or green), and a dark theme (built from its own dark
+  section — paper on ink, white as the accent).
+- **Brown is the button, blue is the link.** The two accents split between the
+  two roles rather than sharing one. Two places cannot follow the button colour,
+  both for contrast: in dark mode the brown sits at 2.04:1 against the ink
+  ground, so it lightens to `#a35a09`; and the sidebar's new-conversation button
+  sits on the blue, where the brown is 1.23:1, so it takes a white fill instead.
+  **Check contrast before changing any of these** — several pairings here are
+  chosen, not inherited.
+- **Controls size themselves.** STYLE.md puts body copy at 20px, which is right
+  for prose and far too big for a form. Buttons, fields and tables set their own
+  size rather than inheriting it; a table matches the links inside it.
+- **Fonts are self-hosted** from `public/fonts/` (Montserrat 700, Lato 400/700,
+  65 kB). No CDN request, and it works offline. There is no logo: the product
+  name is set as text, which is also why the sign-in email carries no image at
+  all and so does not depend on a client allowing them.
+- **"Coachbot" is the word users see; "assistant" is the word the code uses.**
+  The table, the `assistant_id` columns, `AssistantSettings` and the routes all
+  say assistant. Renaming those is churn no reader benefits from — keep new
+  user-facing text on "coachbot" and leave the identifiers alone.
+- **Views are built by a factory** (`createViews`), not free functions, so the
+  product name reaches every page without a module-level global. Routers
   take `views` as a dependency, matching the `createX(deps)` idiom used
   everywhere else.
 - **No Capacitor/Android.** Deliberately skipped: cookie sessions and magic
@@ -243,7 +253,7 @@ context/*.md         knowledge base seeded into a brand-new assistant
 - **Sessions are a fixed 30-day window, not a sliding one.** `expires_at` is
   written once in `createSession` and never extended, so an active user is still
   signed out on day 30. It is enforced twice: the cookie's own `expires`, and
-  `expires_at > datetime('now')` in the session lookup, so a copied cookie dies
+  `expires_at > now()` in the session lookup, so a copied cookie dies
   with the row. Making it sliding means updating the row *and* re-issuing the
   cookie in `findUserBySessionToken`.
 
@@ -301,7 +311,7 @@ context/*.md         knowledge base seeded into a brand-new assistant
   build-time `chown`. `scripts/entrypoint.sh` therefore fixes ownership and then
   drops to `node` with `setpriv` — do not add a `USER node` instruction back, and
   do not assume the build-time chown covers the volume. Symptom if this breaks:
-  `SqliteError: unable to open database file` (`SQLITE_CANTOPEN`) on boot.
+  the server cannot write the assistants directory on boot.
 - **`context/.gitkeep` must stay.** The Dockerfile does `COPY context ./context`,
   and git does not track empty directories — delete the last file in `context/`
   and the *image build* fails with `"/context": not found`, even though the app

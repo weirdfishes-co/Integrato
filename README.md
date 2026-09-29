@@ -70,6 +70,22 @@ npm run typecheck   # tsc --noEmit
 npm test            # vitest
 ```
 
+## Styling
+
+The interface follows [STYLE.md](STYLE.md), reverse-engineered from
+https://g.ieffe.dev. `public/styles.css` binds semantic names (`--bg`, `--text`,
+`--accent`, …) to that palette, so changing the look means changing the tokens
+and the type scale, not the components.
+
+Montserrat and Lato are self-hosted from `public/fonts/` — no CDN request, and
+the app works offline. There is no logo image anywhere, including in the
+sign-in email: the product name is set as text, so nothing depends on a mail
+client allowing images.
+
+Three things STYLE.md's source does not provide were decided here and are marked
+in the stylesheet: hover colours, a status palette for errors and confirmations,
+and a dark theme. Every colour pairing clears WCAG AA.
+
 ## Assistants
 
 An admin creates assistants on **`/admin`**. Each one gets:
