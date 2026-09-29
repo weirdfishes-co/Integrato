@@ -162,6 +162,59 @@ points at `/data` — so at the Railway volume, because otherwise every admin
 change would disappear on the next deploy. A newly created assistant is seeded
 there from the bundled files once; existing content is never overwritten.
 
+## The chat screen
+
+**Answers are rendered as Markdown.** Models write it whether or not you ask
+them to, so headings, bold, lists, tables and code blocks appear as formatting
+rather than as `**asterisks**` and `### hashes`. A user's own message is shown
+exactly as they typed it.
+
+The renderer is [`public/markdown.js`](public/markdown.js), about 200 lines, no
+dependency. It escapes the text *first* and applies the Markdown rules to the
+escaped result, so nothing a model writes can become HTML — a `javascript:`
+link, a `<script>` tag or a quote smuggled into a URL all stay inert, and there
+are tests for each.
+
+**Under the composer is a closed strip, "How this chatbot is set up."** Opening
+it lists the model, the answer language, reasoning effort, sampling, whether
+routing is restricted to the EU, whether messages are anonymized, and whether
+web search, memory, citations and compaction are on.
+
+It is shown to **every user, not only admins**. Which model answers, whether a
+message is anonymized before it is sent and whether it may leave the EU are
+things the person typing has a fair claim to know, and a setting nobody can see
+is a setting nobody can hold you to. Nothing in it is a secret: no key, no
+system prompt, no user list.
+
+### Tokens and cost
+
+Under every answer is a line like `1,234 in · 567 out · $0.0031`, and the setup
+strip carries the running total for the conversation. Reasoning and cached
+tokens are added when the provider reports any:
+
+```
+48 in · 244 out · 242 thinking · $0.000624
+```
+
+That example is real, and it is the reason this is worth showing: the answer was
+the word "Ok.", and 242 of its 244 output tokens were reasoning the user never
+saw but did pay for. Reasoning effort has a price, and now it is visible.
+
+**The cost is OpenRouter's own figure, not a price computed from a rate card.**
+It arrives in the final chunk of the stream (`usage.cost`) and is stored as it
+came, so it already accounts for cache discounts and per-provider pricing.
+
+Two limits worth knowing:
+
+- **Memory extraction and compaction are not in the figure.** Each is a separate
+  model call, billed separately, and the number under an answer is what that
+  answer's own call reported. With both settings on, the true cost of an
+  exchange is higher than what is shown. `/admin` shows the account balance,
+  which does include everything.
+- **Answers from before this existed show no line at all**, and neither does an
+  answer whose connection dropped before the provider sent its usage. That is
+  deliberately blank rather than zero — zero would claim the answer was free.
+
 ## Running on free models
 
 OpenRouter carries ~20 models priced at zero (`:free` suffix, plus a few

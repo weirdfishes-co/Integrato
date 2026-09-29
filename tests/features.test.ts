@@ -9,7 +9,7 @@ import { memorySection, parseFacts } from '../src/memory.js';
 import type { AssistantSettings } from '../src/settings.js';
 
 function message(id: number, content: string): Message {
-  return { id, conversationId: 1, role: 'user', content, createdAt: '' };
+  return { id, conversationId: 1, role: 'user', content, createdAt: '', usage: null };
 }
 
 describe('historyWithSummary', () => {

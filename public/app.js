@@ -11,6 +11,7 @@ const els = {
   prompt: document.getElementById('prompt'),
   send: document.getElementById('send'),
   title: document.getElementById('conversation-title'),
+  totals: document.getElementById('conversation-totals'),
   newConversation: document.getElementById('new-conversation'),
   sidebar: document.getElementById('sidebar'),
   toggleSidebar: document.getElementById('toggle-sidebar'),
@@ -28,9 +29,9 @@ const apiBase = `/api/${encodeURIComponent(assistantSlug)}`;
  * against new routes. The version is on the element rather than the import
  * because a static file cannot template itself.
  */
-const { renderMarkdown } = await import(
-  `./markdown.js?v=${document.querySelector('.app')?.dataset.version ?? ''}`
-);
+const assetVersion = document.querySelector('.app')?.dataset.version ?? '';
+const { renderMarkdown } = await import(`./markdown.js?v=${assetVersion}`);
+const { usageLine, totalsLine } = await import(`./format.js?v=${assetVersion}`);
 
 /** Set per chatbot on its admin page; empty falls back to the sentence below. */
 const welcomeMessage =
@@ -41,6 +42,8 @@ const state = {
   conversations: [],
   activeId: null,
   busy: false,
+  /** Only what the running totals need: one entry per message, usage or null. */
+  messages: [],
 };
 
 // ---------- API ----------
@@ -136,9 +139,36 @@ function addMessage(role, text, options = {}) {
   setBody(body, text, { markdown: role === 'assistant' && !options.error });
 
   wrapper.append(label, body);
+  if (options.usage) renderUsage(wrapper, options.usage);
   els.messages.append(wrapper);
   scrollToBottom();
   return body;
+}
+
+/**
+ * What the answer cost, under the answer.
+ *
+ * Only what the provider reported for this one call. Memory extraction and
+ * compaction are separate calls billed separately, and are not in this figure —
+ * see the README.
+ */
+function renderUsage(wrapper, usage) {
+  if (!usage) return;
+
+  let line = wrapper.querySelector('.usage');
+  if (!line) {
+    line = document.createElement('p');
+    line.className = 'usage';
+    wrapper.append(line);
+  }
+
+  line.textContent = usageLine(usage);
+  line.title = 'Tokens and cost for this answer, as the provider reported them';
+}
+
+/** The conversation so far, in the setup strip. Empty until something is known. */
+function renderTotals() {
+  if (els.totals) els.totals.textContent = totalsLine(state.messages);
 }
 
 /**
@@ -217,14 +247,17 @@ async function openConversation(id) {
   els.title.textContent = data.conversation.title;
   els.messages.replaceChildren();
 
+  state.messages = data.messages.map((message) => ({ usage: message.usage ?? null }));
+
   if (data.messages.length === 0) {
     showEmptyState();
   } else {
     for (const message of data.messages) {
-      addMessage(message.role, message.content);
+      addMessage(message.role, message.content, { usage: message.usage });
     }
   }
 
+  renderTotals();
   renderConversations();
   closeSidebarOnMobile();
   els.prompt.focus();
@@ -235,6 +268,8 @@ async function createConversation() {
   state.conversations.unshift(data.conversation);
   state.activeId = data.conversation.id;
   els.title.textContent = data.conversation.title;
+  state.messages = [];
+  renderTotals();
   showEmptyState();
   renderConversations();
   closeSidebarOnMobile();
@@ -299,6 +334,9 @@ async function sendPrompt(text) {
 
   els.messages.querySelector('.empty-state')?.remove();
   addMessage('user', text);
+  // A user's own message has no usage of its own; it is recorded so the running
+  // total counts the same messages the screen shows.
+  state.messages.push({ usage: null });
 
   const answerBody = addMessage('assistant', '');
   answerBody.classList.add('typing');
@@ -339,6 +377,11 @@ async function sendPrompt(text) {
         sources.push(data);
       } else if (event === 'done') {
         if (sources.length > 0) renderSources(answerBody.parentElement, sources);
+        if (data.usage) {
+          renderUsage(answerBody.parentElement, data.usage);
+          state.messages.push({ usage: data.usage });
+          renderTotals();
+        }
       } else if (event === 'title') {
         els.title.textContent = data.title;
         const conversation = state.conversations.find((item) => item.id === state.activeId);

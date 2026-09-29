@@ -1195,7 +1195,8 @@ input[type='file'] {
   width: 100%;
   border-top: 1px solid var(--border-strong);
   padding-top: var(--space-4);
-  padding-bottom: calc(var(--space-5) + env(safe-area-inset-bottom));
+  /* The setup strip sits below and carries the bottom inset instead. */
+  padding-bottom: var(--space-4);
   /* Centres the field on the message column while the rule still spans the
      whole pane — a rule that stopped at the form's width read as a stray line. */
   padding-inline: max(var(--space-4), (100% - (65ch + 8rem)) / 2);
@@ -1455,5 +1456,129 @@ input[type='file'] {
   .picker__name,
   .picker__description {
     transition: none;
+  }
+}
+
+/* ---------- the setup strip under the composer ---------- */
+
+/*
+ * What the chatbot is set to, in a closed <details>. Native, so it needs no
+ * JavaScript and keeps its keyboard behaviour for free. It is deliberately the
+ * quietest thing on the screen: it answers a question people ask once.
+ */
+.setup {
+  border-top: 1px solid var(--border);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-inline: max(var(--space-4), (100% - (65ch + 8rem)) / 2);
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+  color: var(--text-muted);
+}
+
+.setup__summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  cursor: pointer;
+  /* The marker is drawn by ::before below, so the row can be a flex container. */
+  list-style: none;
+}
+
+.setup__summary::-webkit-details-marker {
+  display: none;
+}
+
+.setup__summary::before {
+  content: '▸';
+  margin-right: var(--space-2);
+  transition: transform var(--transition);
+}
+
+.setup[open] .setup__summary::before {
+  transform: rotate(90deg);
+}
+
+.setup__summary:hover {
+  color: var(--text);
+}
+
+.setup__summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/*
+ * The running total for this conversation. It sits between the label and the
+ * model and takes the spare room, so both of those keep their place as the
+ * number grows.
+ */
+.setup__totals {
+  flex: 1;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The model is the one thing worth reading while the strip is shut. */
+.setup__model {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Per-answer tokens and cost, under the answer it belongs to. */
+.usage {
+  margin: var(--space-1) 0 0;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.setup__list {
+  margin: 0;
+  padding: 0 0 var(--space-4);
+  display: grid;
+  gap: var(--space-1);
+}
+
+.setup__row {
+  display: grid;
+  grid-template-columns: 14rem 1fr;
+  gap: var(--space-3);
+  align-items: baseline;
+}
+
+.setup__row dt {
+  color: var(--text);
+}
+
+.setup__row dd {
+  margin: 0;
+}
+
+.setup__note::before {
+  content: '— ';
+}
+
+.setup__note {
+  color: var(--text-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setup__summary::before {
+    transition: none;
+  }
+}
+
+/* Two columns do not fit a phone; the value goes under its label. */
+@media (max-width: 560px) {
+  .setup__row {
+    grid-template-columns: 1fr;
+    gap: 0;
+    margin-bottom: var(--space-2);
   }
 }

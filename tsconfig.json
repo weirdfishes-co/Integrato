@@ -16,5 +16,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src", "tests", "scripts", "public/markdown.js"]
+  "include": ["src", "tests", "scripts", "public/markdown.js", "public/format.js"]
 }

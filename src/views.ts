@@ -127,6 +127,86 @@ function balancePanel(balance: Balance | null | undefined): string {
 }
 
 /** e.g. "Anthropic: Claude Opus 5 — 1000K ctx · $5/$25 per Mtok" */
+/** One row of the footer under the chat: a label and what it is set to. */
+function settingRow(label: string, value: string, note?: string): string {
+  return `          <div class="setup__row">
+            <dt>${escapeHtml(label)}</dt>
+            <dd>${escapeHtml(value)}${
+              note ? ` <span class="setup__note">${escapeHtml(note)}</span>` : ''
+            }</dd>
+          </div>`;
+}
+
+function onOff(enabled: boolean): string {
+  return enabled ? 'On' : 'Off';
+}
+
+/**
+ * What this chatbot is set to, in a closed accordion under the composer.
+ *
+ * It is shown to every user, not only to admins. Which model answers, whether
+ * a message is anonymized first and whether it may leave the EU are things the
+ * person typing has a fair claim to know — and a setting nobody can see is a
+ * setting nobody can hold you to. Nothing here is a secret: no key, no prompt,
+ * no user list.
+ */
+function setupFooter(assistant: Assistant, settings: AssistantSettings): string {
+  const sampling: string[] = [];
+  if (settings.temperature !== null) sampling.push(`temperature ${settings.temperature}`);
+  if (settings.topP !== null) sampling.push(`top-p ${settings.topP}`);
+
+  const search = settings.webSearch
+    ? [
+        settings.webSearchIncludeDomains.length > 0
+          ? `only ${settings.webSearchIncludeDomains.join(', ')}`
+          : settings.webSearchExcludeDomains.length > 0
+            ? `never ${settings.webSearchExcludeDomains.join(', ')}`
+            : 'the whole web',
+        `${settings.webSearchMaxResults} results`,
+      ].join(', ')
+    : undefined;
+
+  return `      <details class="setup">
+        <summary class="setup__summary">
+          <span>How this chatbot is set up</span>
+          <!-- Filled in by app.js as the conversation grows; the strip is the
+               bottom of the screen, which is where a running total belongs. -->
+          <span class="setup__totals" id="conversation-totals"
+                title="Tokens and cost for this conversation"></span>
+          <span class="setup__model">${escapeHtml(settings.model)}</span>
+        </summary>
+        <dl class="setup__list">
+${[
+  settingRow('Model', settings.model),
+  settingRow('Answers in', assistant.language),
+  settingRow('Reasoning effort', settings.effort, settings.showThinking ? 'shown above the answer' : undefined),
+  settingRow(
+    'Sampling',
+    sampling.length > 0 ? sampling.join(', ') : "the model's own defaults",
+  ),
+  settingRow(
+    'Providers',
+    settings.euOnly ? 'EU and EEA data centres only' : 'no regional restriction',
+  ),
+  settingRow(
+    'Anonymization',
+    onOff(settings.anonymize),
+    settings.anonymize
+      ? 'email, phone, IBAN, card, BSN, IP and postcode are replaced before sending — names are not'
+      : undefined,
+  ),
+  settingRow('Web search', onOff(settings.webSearch), search),
+  settingRow(
+    'Remembers you between conversations',
+    onOff(settings.memory),
+  ),
+  settingRow('Cites its documents', onOff(settings.citations)),
+  settingRow('Summarizes long conversations', onOff(settings.compaction)),
+].join('\n')}
+        </dl>
+      </details>`;
+}
+
 function modelLabel(model: ModelOption): string {
   const parts: string[] = [model.name];
   if (model.contextLength > 0) {
@@ -188,7 +268,12 @@ export interface Views {
   linkSentPage(email: string): string;
   /** Assistant list for a signed-in user; only what they may use. */
   pickerPage(user: User, assistants: readonly Assistant[]): string;
-  chatPage(user: User, assistant: Assistant, showBackToPicker: boolean): string;
+  chatPage(
+    user: User,
+    assistant: Assistant,
+    showBackToPicker: boolean,
+    settings: AssistantSettings,
+  ): string;
   adminPage(users: readonly User[], currentUser: User, options?: AdminPageOptions): string;
   /** One assistant: its identity, settings and who may use it. */
   assistantPage(assistant: Assistant, options?: AssistantPageOptions): string;
@@ -262,7 +347,7 @@ ${passwordField}
       });
     },
 
-    chatPage(user, assistant, showBackToPicker) {
+    chatPage(user, assistant, showBackToPicker, settings) {
       const label = escapeHtml(assistant.name);
       return layout({
         title: assistant.name,
@@ -302,6 +387,8 @@ ${passwordField}
           <textarea id="prompt" name="prompt" rows="1" placeholder="Ask your question…" autocomplete="off"></textarea>
           <button type="submit" id="send" aria-label="Send">Send</button>
         </form>
+
+${setupFooter(assistant, settings)}
       </main>
     </div>`,
       });

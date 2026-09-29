@@ -58,6 +58,24 @@ export interface Message {
   role: Role;
   content: string;
   createdAt: string;
+  /** What the answer cost, or null on a user message and on older rows. */
+  usage: MessageUsage | null;
+}
+
+/**
+ * What one answer consumed, as OpenRouter reported it.
+ *
+ * `cost` is the provider's own figure in US dollars, not a price we computed
+ * from a rate card — which is why it is worth storing rather than deriving.
+ */
+export interface MessageUsage {
+  promptTokens: number;
+  completionTokens: number;
+  /** Part of completionTokens that was reasoning, when the model reports it. */
+  reasoningTokens: number;
+  /** Part of promptTokens served from the provider's cache, so billed less. */
+  cachedTokens: number;
+  cost: number;
 }
 
 interface UserRow {
@@ -103,6 +121,12 @@ interface MessageRow {
   role: Role;
   content: string;
   created_at: string;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  reasoning_tokens: number | null;
+  cached_tokens: number | null;
+  /** NUMERIC comes back as a string; the driver's parsing is off. */
+  cost: string | null;
 }
 
 /**
@@ -171,6 +195,23 @@ function toMessage(row: MessageRow): Message {
     role: row.role,
     content: row.content,
     createdAt: requireTime(row.created_at),
+    usage: toUsage(row),
+  };
+}
+
+/**
+ * Usage is all-or-nothing: a row either recorded an answer's cost or it did
+ * not, and a half-filled object would invite a display that reads "0 tokens"
+ * for a message that simply predates the columns.
+ */
+function toUsage(row: MessageRow): MessageUsage | null {
+  if (row.prompt_tokens === null || row.completion_tokens === null) return null;
+  return {
+    promptTokens: row.prompt_tokens,
+    completionTokens: row.completion_tokens,
+    reasoningTokens: row.reasoning_tokens ?? 0,
+    cachedTokens: row.cached_tokens ?? 0,
+    cost: row.cost === null ? 0 : Number(row.cost),
   };
 }
 
@@ -344,16 +385,33 @@ export function createRepo(db: Db) {
     // ---- messages ---------------------------------------------------------
 
     /** Inserts the message and bumps the conversation in one statement. */
-    async addMessage(conversationId: number, role: Role, content: string): Promise<Message> {
+    async addMessage(
+      conversationId: number,
+      role: Role,
+      content: string,
+      usage: MessageUsage | null = null,
+    ): Promise<Message> {
       const row = await db.one<MessageRow>(
         `WITH inserted AS (
-           INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)
+           INSERT INTO messages
+             (conversation_id, role, content,
+              prompt_tokens, completion_tokens, reasoning_tokens, cached_tokens, cost)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
            RETURNING *
          ), touched AS (
            UPDATE conversations SET updated_at = now() WHERE id = $1
          )
          SELECT * FROM inserted`,
-        [conversationId, role, content],
+        [
+          conversationId,
+          role,
+          content,
+          usage?.promptTokens ?? null,
+          usage?.completionTokens ?? null,
+          usage?.reasoningTokens ?? null,
+          usage?.cachedTokens ?? null,
+          usage?.cost ?? null,
+        ],
       );
       if (!row) throw new Error('Could not add message');
       return toMessage(row);

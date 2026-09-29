@@ -5,7 +5,7 @@ import { assistantPaths } from '../assistants.js';
 import { compactConversation, historyWithSummary } from '../compaction.js';
 import type { Config } from '../config.js';
 import { buildSystemPrompt } from '../context.js';
-import type { Assistant, Repo } from '../db/repo.js';
+import type { Assistant, MessageUsage, Repo } from '../db/repo.js';
 import type { ChatClient, SourceLink } from '../llm.js';
 import { ChatRefusalError, describeChatError } from '../llm.js';
 import { logger } from '../logger.js';
@@ -85,8 +85,13 @@ export function createChatRouter({ config, repo, auth, chat, views }: ChatRouteD
   router.get('/:slug', auth.requireUser, async (req, res) => {
     const assistant = await resolveAssistant(req, res);
     if (!assistant) return;
-    const others = (await repo.listAssistantsForUser(req.user!.id, req.user!.isAdmin)).length;
-    res.type('html').send(views.chatPage(req.user!, assistant, others > 1));
+    // The footer under the chat states how this chatbot is set up, so the page
+    // needs its settings as well as its identity.
+    const [others, settings] = await Promise.all([
+      repo.listAssistantsForUser(req.user!.id, req.user!.isAdmin),
+      loadSettings(repo, config, assistant.id),
+    ]);
+    res.type('html').send(views.chatPage(req.user!, assistant, others.length > 1, settings));
   });
 
   router.get('/api/:slug/conversations', auth.requireUser, async (req, res) => {
@@ -199,6 +204,7 @@ export function createChatRouter({ config, repo, auth, chat, views }: ChatRouteD
 
       let answer = '';
       let sources: SourceLink[] = [];
+      let usage: MessageUsage | null = null;
       try {
         const result = await chat.stream(
           { systemPrompt, history, settings, signal: abort.signal },
@@ -213,9 +219,12 @@ export function createChatRouter({ config, repo, auth, chat, views }: ChatRouteD
         );
         answer = result.answer;
         sources = result.sources;
+        usage = result.usage;
       } catch (error) {
         if (abort.signal.aborted) {
           // The client dropped the connection; keep whatever already arrived.
+          // Whatever arrived is kept, but without usage: the provider sends
+          // that in a final chunk this connection never got to.
           if (answer.trim().length > 0) await repo.addMessage(conversationId, 'assistant', answer);
           res.end();
           return;
@@ -228,7 +237,7 @@ export function createChatRouter({ config, repo, auth, chat, views }: ChatRouteD
         return;
       }
 
-      await repo.addMessage(conversationId, 'assistant', answer);
+      const answerMessage = await repo.addMessage(conversationId, 'assistant', answer, usage);
 
       // The first user message determines the title of a fresh conversation.
       if (existing.title === UNTITLED) {
@@ -237,7 +246,7 @@ export function createChatRouter({ config, repo, auth, chat, views }: ChatRouteD
         send('title', { title });
       }
 
-      send('done', { model: settings.model, sources });
+      send('done', { model: settings.model, sources, usage: answerMessage.usage });
       res.end();
 
       // Memory and compaction run after the answer is delivered: they cost an

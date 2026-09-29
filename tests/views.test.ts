@@ -155,3 +155,91 @@ describe('the chatbot settings form', () => {
     expect(render({ anonymize: true })).toContain('does not catch names');
   });
 });
+
+describe('the setup strip under the chat', () => {
+  const user: User = {
+    id: 2,
+    email: 'user@example.com',
+    isAdmin: false,
+    createdAt: '',
+    lastSeenAt: null,
+  };
+
+  const assistant: Assistant = {
+    id: 7,
+    slug: 'coach',
+    name: 'Coach',
+    description: '',
+    language: 'Nederlands',
+    welcome: '',
+    createdAt: '',
+  };
+
+  const off: AssistantSettings = {
+    model: 'google/gemini-3.5-flash-lite',
+    effort: 'high',
+    showThinking: false,
+    webSearch: false,
+    webSearchMaxResults: 5,
+    webSearchIncludeDomains: [],
+    webSearchExcludeDomains: [],
+    memory: false,
+    citations: false,
+    compaction: false,
+    euOnly: false,
+    anonymize: false,
+    temperature: null,
+    topP: null,
+  };
+
+  function render(overrides: Partial<AssistantSettings> = {}): string {
+    return views.chatPage(user, assistant, false, { ...off, ...overrides });
+  }
+
+  /* A native <details>, so the accordion needs no script and keeps its keys. */
+  it('is a closed accordion', () => {
+    const html = render();
+
+    expect(html).toContain('<details class="setup">');
+    expect(html).not.toContain('<details class="setup" open>');
+  });
+
+  it('names the model while it is still shut', () => {
+    expect(render()).toContain('<span class="setup__model">google/gemini-3.5-flash-lite</span>');
+  });
+
+  it('states the routing either way', () => {
+    expect(render({ euOnly: true })).toContain('EU and EEA data centres only');
+    expect(render()).toContain('no regional restriction');
+  });
+
+  /*
+   * The limit has to travel with the claim: a user told their message is
+   * anonymized would otherwise assume their name was covered.
+   */
+  it('says names are not anonymized, right where it says anonymization is on', () => {
+    expect(render({ anonymize: true })).toContain('names are not');
+  });
+
+  it('reports the sampling, or that the model decides', () => {
+    expect(render({ temperature: 0.3, topP: 0.9 })).toContain('temperature 0.3, top-p 0.9');
+    expect(render()).toContain("the model&#39;s own defaults");
+  });
+
+  it('spells out what web search may reach', () => {
+    expect(render({ webSearch: true, webSearchIncludeDomains: ['nyenrode.nl'] })).toContain(
+      'only nyenrode.nl, 5 results',
+    );
+    expect(render({ webSearch: true })).toContain('the whole web');
+  });
+
+  it('shows the answer language from the chatbot, not the settings', () => {
+    expect(render()).toContain('Nederlands');
+  });
+
+  /* It is shown to everyone; nothing in it is a secret. */
+  it('is there for an ordinary user, not only an admin', () => {
+    expect(user.isAdmin).toBe(false);
+    expect(render()).toContain('How this chatbot is set up');
+  });
+});

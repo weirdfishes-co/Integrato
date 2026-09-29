@@ -2,7 +2,7 @@ import OpenAI from 'openai';
 
 import { anonymizeBatch } from './anonymize.js';
 import type { Config, Effort } from './config.js';
-import type { Role } from './db/repo.js';
+import type { MessageUsage, Role } from './db/repo.js';
 import { logger } from './logger.js';
 import { euProviderTags } from './models.js';
 import type { AssistantSettings } from './settings.js';
@@ -49,6 +49,11 @@ export interface ChatEvents {
 export interface ChatResult {
   answer: string;
   sources: SourceLink[];
+  /**
+   * What the answer consumed, as the provider reported it — null when the
+   * stream ended without a usage chunk, which some providers do.
+   */
+  usage: MessageUsage | null;
 }
 
 export interface ChatClient {
@@ -127,6 +132,32 @@ interface WebPlugin {
   exclude_domains?: string[];
 }
 
+/**
+ * The usage chunk OpenRouter sends last. `cost` is its own extension and the
+ * reason this is worth reading rather than multiplying tokens by a rate card:
+ * it is the figure actually billed, cache discounts and all.
+ */
+interface OpenRouterUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  cost?: number;
+  prompt_tokens_details?: { cached_tokens?: number };
+  completion_tokens_details?: { reasoning_tokens?: number };
+}
+
+function toUsage(usage: OpenRouterUsage | undefined): MessageUsage | null {
+  if (!usage || typeof usage.prompt_tokens !== 'number' || typeof usage.completion_tokens !== 'number') {
+    return null;
+  }
+  return {
+    promptTokens: usage.prompt_tokens,
+    completionTokens: usage.completion_tokens,
+    reasoningTokens: usage.completion_tokens_details?.reasoning_tokens ?? 0,
+    cachedTokens: usage.prompt_tokens_details?.cached_tokens ?? 0,
+    cost: typeof usage.cost === 'number' ? usage.cost : 0,
+  };
+}
+
 /** OpenRouter extends the OpenAI request body with these fields. */
 interface OpenRouterParams extends OpenAI.ChatCompletionCreateParamsStreaming {
   /** Caches the stable prompt prefix on providers that support it (Anthropic). */
@@ -134,6 +165,8 @@ interface OpenRouterParams extends OpenAI.ChatCompletionCreateParamsStreaming {
   reasoning?: ReasoningConfig;
   plugins?: WebPlugin[];
   provider?: ProviderPreferences;
+  /** OpenRouter's flag for adding `cost` to the usage it reports. */
+  usage?: { include: true };
 }
 
 interface OpenRouterCompletionParams extends OpenAI.ChatCompletionCreateParamsNonStreaming {
@@ -272,6 +305,11 @@ export function createChatClient(config: Config): ChatClient {
         cache_control: { type: 'ephemeral' },
         reasoning: { effort: settings.effort, exclude: !settings.showThinking },
         plugins: webPlugin(settings),
+        // Two flags, deliberately: stream_options is the OpenAI-standard way to
+        // get a usage chunk at all, and `usage.include` is OpenRouter's way to
+        // put the billed cost in it.
+        stream_options: { include_usage: true },
+        usage: { include: true },
         ...sampling(settings),
         ...(provider ? { provider } : {}),
         messages: [
@@ -284,10 +322,15 @@ export function createChatClient(config: Config): ChatClient {
 
       let answer = '';
       let refused = false;
+      let usage: MessageUsage | null = null;
       const sources: SourceLink[] = [];
       const seenUrls = new Set<string>();
 
       for await (const chunk of stream) {
+        // The usage chunk carries no choices, so it has to be read before
+        // anything below gives up on an empty delta.
+        usage = toUsage((chunk as { usage?: OpenRouterUsage }).usage) ?? usage;
+
         const choice = chunk.choices[0];
         if (choice?.finish_reason === 'content_filter') {
           refused = true;
@@ -322,7 +365,7 @@ export function createChatClient(config: Config): ChatClient {
         throw new ChatRefusalError('The model declined to answer this request.');
       }
 
-      return { answer, sources };
+      return { answer, sources, usage };
     },
 
     async complete({ settings, system, user, maxTokens }) {

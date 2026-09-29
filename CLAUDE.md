@@ -59,6 +59,8 @@ src/
     repo.ts          all SQL, parameterized
     migrations/      forward-only .sql files
 public/              styles.css, app.js, upload.js (frontend, no build step)
+  markdown.js        renders an answer's Markdown; escapes first, always
+  format.js          tokens and cost as text; its own module so it is testable
 public/fonts/        Montserrat + Lato, self-hosted — no CDN font request
 STYLE.md             styleguide of record; public/styles.css implements it
 scripts/build.mjs    esbuild bundle to dist/ + copy migrations
@@ -66,7 +68,7 @@ scripts/entrypoint.sh  takes ownership of /data, then drops to the node user
 tests/               vitest: auth, content, context, settings, features
                      (memory + compaction), views, mail, assistants
                      (slugs, rights matrix, isolation), privacy
-                     (anonymization + EU routing)
+                     (anonymization + EU routing), markdown, usage
 instr.md             system prompt — the user owns its content
 instr.example.md     neutral starting prompt, safe to copy over instr.md
 context/*.md         knowledge base seeded into a brand-new assistant
@@ -210,6 +212,38 @@ context/*.md         knowledge base seeded into a brand-new assistant
   a temperature outright. The settings table has no nulls, so unset is stored as
   the empty string — which is what keeps it distinguishable from 0, a
   temperature an admin may well want.
+- **Answers are Markdown, and the escaping comes first.** `public/markdown.js`
+  escapes the text and then applies the Markdown rules *to the escaped result*,
+  so nothing a model writes can become a tag — by the time the rules run, a `<`
+  is already `&lt;`. **Do not reorder that**: it is the entire defence, and it is
+  why a `.innerHTML` write here needs no sanitizer. Links are the one place an
+  attribute is built, so the scheme is checked (http, https, mailto only) and the
+  URL is escaped like everything else. It re-runs on the whole answer for each
+  streamed chunk, because a chunk can arrive inside `**bold**` and only the full
+  text says whether a marker has closed. Only assistant messages are rendered:
+  a user's own text is shown as typed, and an error is our sentence, not the
+  model's.
+- **The setup strip under the chat is for users, not admins.** Which model
+  answers, whether a message is anonymized and whether it may leave the EU are
+  things the person typing has a claim to know, and a setting nobody can see is
+  one nobody can be held to. It is a native `<details>`, so the accordion needs
+  no script. Nothing in it is a secret — no key, no system prompt, no user list —
+  and anything added to it must stay that way.
+- **The cost of an answer is the provider's number, not ours.** OpenRouter puts
+  `usage.cost` in the last chunk of the stream, already accounting for cache
+  discounts and the endpoint actually used; deriving it from a rate card would
+  drift the moment either changed. It takes **two** request flags that are easy
+  to confuse: `stream_options: {include_usage: true}` is the OpenAI-standard way
+  to get a usage chunk at all, and `usage: {include: true}` is OpenRouter's way
+  to put `cost` inside it. The usage chunk carries **no choices**, so it must be
+  read before the loop gives up on an empty delta.
+  Usage is stored on the assistant message and is **null, never zero**, when
+  nothing was reported: zero claims an answer was free, which is a different
+  statement from "not recorded". `cost` is `NUMERIC` and the driver returns it as
+  a **string** — `toUsage` converts it, and without that every sum would
+  concatenate. What is *not* counted: memory extraction and compaction are
+  separate calls, so an exchange's true cost is higher than the line under it
+  says. That is documented in the README rather than papered over.
 - **Memory goes after the knowledge base in the system prompt**, never before.
   The knowledge base is the cached prefix shared by every user; putting a
   per-user block in front of it would invalidate the cache for everyone on every
