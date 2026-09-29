@@ -8,9 +8,13 @@
     "noUncheckedIndexedAccess": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
+    // The frontend ships as plain JS with no build step; this lets a test
+    // import the Markdown renderer. checkJs stays off — the browser files are
+    // not typechecked, only reachable.
+    "allowJs": true,
     "skipLibCheck": true,
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src", "tests", "scripts"]
+  "include": ["src", "tests", "scripts", "public/markdown.js"]
 }

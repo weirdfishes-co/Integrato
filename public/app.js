@@ -21,6 +21,17 @@ const assistantName = document.querySelector('.app')?.dataset.assistant || 'Assi
 /** Every API call is scoped to the assistant this page belongs to. */
 const assistantSlug = document.querySelector('.app')?.dataset.slug || '';
 const apiBase = `/api/${encodeURIComponent(assistantSlug)}`;
+/*
+ * The renderer is imported with the page's asset version, because a plain
+ * `import './markdown.js'` would be cached under one URL for an hour in
+ * production — the same trap that once left browsers running an old app.js
+ * against new routes. The version is on the element rather than the import
+ * because a static file cannot template itself.
+ */
+const { renderMarkdown } = await import(
+  `./markdown.js?v=${document.querySelector('.app')?.dataset.version ?? ''}`
+);
+
 /** Set per chatbot on its admin page; empty falls back to the sentence below. */
 const welcomeMessage =
   document.querySelector('.app')?.dataset.welcome?.trim() ||
@@ -95,6 +106,23 @@ function shortenTitle(title) {
   return `${title.slice(0, MAX_TITLE_CHARS - 1).trimEnd()}…`;
 }
 
+/**
+ * Puts text in a message body, as Markdown or as typed.
+ *
+ * Only the model's answers are Markdown. The user's own message is shown
+ * exactly as they wrote it — running it through a renderer would mean their
+ * asterisks disappear and their indentation moves — and so is an error, which
+ * is our sentence and not the model's.
+ */
+function setBody(body, text, { markdown }) {
+  body.classList.toggle('message__body--rich', markdown);
+  if (markdown) {
+    body.innerHTML = renderMarkdown(text);
+  } else {
+    body.textContent = text;
+  }
+}
+
 function addMessage(role, text, options = {}) {
   const wrapper = document.createElement('article');
   wrapper.className = `message message--${role}${options.error ? ' message--error' : ''}`;
@@ -105,7 +133,7 @@ function addMessage(role, text, options = {}) {
 
   const body = document.createElement('div');
   body.className = 'message__body';
-  body.textContent = text;
+  setBody(body, text, { markdown: role === 'assistant' && !options.error });
 
   wrapper.append(label, body);
   els.messages.append(wrapper);
@@ -298,7 +326,10 @@ async function sendPrompt(text) {
     await readEvents(response, (event, data) => {
       if (event === 'delta') {
         answer += data.text;
-        answerBody.textContent = answer;
+        // Re-rendered from the whole answer each time rather than appended to:
+        // a chunk can arrive in the middle of `**bold**`, and only the full
+        // text says whether that marker has found its partner yet.
+        setBody(answerBody, answer, { markdown: true });
         scrollToBottom();
       } else if (event === 'thinking') {
         thinking += data.text;
@@ -317,17 +348,17 @@ async function sendPrompt(text) {
         }
       } else if (event === 'error') {
         answerBody.parentElement.classList.add('message--error');
-        answerBody.textContent = data.message;
+        setBody(answerBody, data.message, { markdown: false });
       }
     });
 
     if (answer.length === 0 && answerBody.textContent.length === 0) {
       answerBody.parentElement.classList.add('message--error');
-      answerBody.textContent = 'No answer received. Please try again.';
+      setBody(answerBody, 'No answer received. Please try again.', { markdown: false });
     }
   } catch (error) {
     answerBody.parentElement.classList.add('message--error');
-    answerBody.textContent = error.message;
+    setBody(answerBody, error.message, { markdown: false });
   } finally {
     answerBody.classList.remove('typing');
     setBusy(false);

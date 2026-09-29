@@ -269,7 +269,8 @@ ${passwordField}
         scripts: ['/app.js'],
         body: `    <div class="app" data-email="${escapeHtml(user.email)}" data-assistant="${label}"
          data-slug="${escapeHtml(assistant.slug)}"
-         data-welcome="${escapeHtml(assistant.welcome)}">
+         data-welcome="${escapeHtml(assistant.welcome)}"
+         data-version="${ASSET_VERSION}">
       <aside class="sidebar" id="sidebar">
         <div class="sidebar__head">
           <div class="sidebar__brand">

@@ -1028,6 +1028,123 @@ input[type='file'] {
   overflow-wrap: anywhere;
 }
 
+/*
+ * A rendered answer: real blocks, so the newlines between the tags must not be
+ * shown. Only the assistant's own messages get this — what a user typed is
+ * still shown exactly as typed, which is what pre-wrap above is for.
+ */
+.message__body--rich {
+  white-space: normal;
+}
+
+/* Tight, because these are the paragraphs of one answer, not of a page. */
+.message__body--rich > :first-child { margin-top: 0; }
+.message__body--rich > :last-child { margin-bottom: 0; }
+
+.message__body--rich p {
+  margin: 0 0 var(--space-3);
+}
+
+.message__body--rich h3,
+.message__body--rich h4,
+.message__body--rich h5,
+.message__body--rich h6 {
+  font-family: var(--font-heading);
+  color: var(--heading);
+  line-height: 1.3;
+  margin: var(--space-5) 0 var(--space-2);
+}
+
+/*
+ * The guide's jump from h1 to h2 is enormous, which is right for a page and
+ * wrong inside an answer: these are labels within a few paragraphs of text, so
+ * they step gently and lean on weight instead.
+ */
+.message__body--rich h3 { font-size: 1.125rem; }
+.message__body--rich h4 { font-size: 1.0625rem; }
+.message__body--rich h5,
+.message__body--rich h6 { font-size: 1rem; }
+
+.message__body--rich ul,
+.message__body--rich ol {
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-5);
+}
+
+.message__body--rich li {
+  margin-bottom: var(--space-1);
+}
+
+/* A nested list belongs to its parent item, not to the space after it. */
+.message__body--rich li > ul,
+.message__body--rich li > ol {
+  margin: var(--space-1) 0 0;
+}
+
+.message__body--rich code {
+  background: var(--bg-subtle);
+  padding: 0.1em 0.3em;
+  border: 1px solid var(--border);
+}
+
+.message__body--rich pre {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+/* Inside a block the padding and border would be drawn twice. */
+.message__body--rich pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.875rem;
+  white-space: pre;
+}
+
+.message__body--rich blockquote {
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-3);
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-muted);
+}
+
+.message__body--rich hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: var(--space-4) 0;
+}
+
+.message__body--rich .md-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 var(--space-3);
+  font-size: 0.875rem;
+  /* A wide table scrolls rather than stretching the 65ch column. */
+  display: block;
+  overflow-x: auto;
+}
+
+.message__body--rich .md-table th,
+.message__body--rich .md-table td {
+  border: 1px solid var(--border);
+  padding: var(--space-2);
+  text-align: left;
+  vertical-align: top;
+}
+
+.message__body--rich .md-table th {
+  background: var(--bg-subtle);
+  font-family: var(--font-heading);
+  font-weight: 700;
+}
+
+.message__body--rich a {
+  text-decoration: underline;
+}
+
 .message--user .message__body {
   background: var(--bubble-user);
   border-radius: var(--radius-card);
