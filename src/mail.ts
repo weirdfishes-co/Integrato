@@ -52,7 +52,7 @@ interface Message {
 }
 
 /**
- * Brand tokens from STYLEGUIDE.md. Repeated as literals rather than read from
+ * Brand tokens from the Nyenrode palette. Repeated as literals rather than read from
  * the stylesheet because an email carries its own styling inline — no client
  * fetches a stylesheet, and many strip <style> blocks entirely.
  */
