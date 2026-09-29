@@ -108,7 +108,7 @@ export function loadConfig(env: Env = process.env): Config {
   const nodeEnv = optional(env, 'NODE_ENV', 'development');
   const isProduction = nodeEnv === 'production';
   const appUrl = optional(env, 'APP_URL', 'http://localhost:3000').replace(/\/+$/, '');
-  const assistantName = optional(env, 'ASSISTANT_NAME', 'Nyenrode coachbot');
+  const assistantName = optional(env, 'ASSISTANT_NAME', 'Unlimited Brain');
 
   const adminEmails = parseEmailList(env.ADMIN_EMAILS ?? env.ADMIN_EMAIL);
   if (adminEmails.length === 0) {
