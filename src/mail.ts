@@ -52,40 +52,33 @@ interface Message {
 }
 
 /**
- * Brand tokens from the Nyenrode palette. Repeated as literals rather than read from
+ * Brand tokens from STYLE.md. Repeated as literals rather than read from
  * the stylesheet because an email carries its own styling inline — no client
  * fetches a stylesheet, and many strip <style> blocks entirely.
  */
 const BRAND = {
-  primary: '#355071',
-  secondary: '#fbba20',
-  gray: '#eceef2',
-  border: '#d7dae1',
-  text: '#1f2933',
-  muted: '#5e5f61',
+  primary: '#0c4466',
+  paper: '#f9f9f9',
+  gray: '#f3f3f3',
+  border: '#efefef',
+  text: '#1c1c1c',
+  muted: '#55565a',
 } as const;
 
 /** Web fonts do not load in mail clients, so these are only the fallbacks. */
-const BODY_FONT =
-  "'Open Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
-const HEADING_FONT = "'Noto Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+const BODY_FONT = "Lato, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+const HEADING_FONT = "Montserrat, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
 
 /**
  * The email itself; exported so tests can check it without sending.
  *
- * `appUrl` is needed because an image in an email has to be an absolute URL.
- * Most clients block images until the reader allows them, so the logo carries
- * alt text and nothing below it depends on the image having loaded.
+ * There is no image in it at all: the wordmark is text, so nothing depends on
+ * the reader allowing images — which most clients block by default — and there
+ * is no absolute URL to get wrong.
  */
-export function buildMagicLinkEmail(
-  appName: string,
-  appUrl: string,
-  link: string,
-  minutesValid: number,
-): Message {
+export function buildMagicLinkEmail(appName: string, link: string, minutesValid: number): Message {
   const safeLink = escapeHtml(link);
   const safeName = escapeHtml(appName);
-  const logo = `${escapeHtml(appUrl.replace(/\/+$/, ''))}/header_ny.jpg`;
 
   const html = `<!doctype html>
 <html lang="en">
@@ -104,8 +97,9 @@ export function buildMagicLinkEmail(
 
             <tr>
               <td align="left" style="padding:28px 32px 0;">
-                <img src="${logo}" alt="Nyenrode Business Universiteit" width="220"
-                     style="display:block;width:220px;max-width:70%;height:auto;border:0;">
+                <p style="margin:0;font-family:${HEADING_FONT};font-size:14px;line-height:20px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${BRAND.muted};">
+                  ${safeName}
+                </p>
               </td>
             </tr>
 
@@ -129,9 +123,9 @@ export function buildMagicLinkEmail(
               <td style="padding:24px 32px 0;">
                 <table role="presentation" cellpadding="0" cellspacing="0" border="0">
                   <tr>
-                    <td style="background:${BRAND.secondary};border:1px solid ${BRAND.secondary};">
+                    <td style="background:${BRAND.primary};border:1px solid ${BRAND.primary};">
                       <a href="${safeLink}"
-                         style="display:inline-block;padding:10px 16px;font-size:16px;font-weight:700;text-transform:uppercase;text-decoration:none;color:${BRAND.primary};">
+                         style="display:inline-block;padding:10px 16px;font-size:16px;font-weight:700;text-decoration:none;color:${BRAND.paper};">
                         Sign in
                       </a>
                     </td>
@@ -162,7 +156,7 @@ export function buildMagicLinkEmail(
           </table>
 
           <p style="margin:16px 0 0;font-size:12px;line-height:20px;color:${BRAND.muted};font-family:${BODY_FONT};">
-            ${safeName} — Nyenrode Business Universiteit
+            ${safeName}
           </p>
 
         </td>
@@ -179,7 +173,6 @@ export function buildMagicLinkEmail(
     '',
     'Did not request a sign-in link yourself? You can safely ignore this email.',
     '',
-    `${appName} — Nyenrode Business Universiteit`,
   ].join('\n');
 
   return { subject: `Your sign-in link for ${appName}`, html, text };
@@ -191,7 +184,7 @@ function createBrevoMailer(config: Config, apiKey: string): Mailer {
 
   return {
     async sendMagicLink(to, link, minutesValid) {
-      const message = buildMagicLinkEmail(appName, config.appUrl, link, minutesValid);
+      const message = buildMagicLinkEmail(appName, link, minutesValid);
 
       const response = await fetch(BREVO_URL, {
         method: 'POST',

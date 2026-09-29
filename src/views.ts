@@ -49,10 +49,6 @@ function layout({ title, body, bodyClass, scripts = [] }: LayoutOptions): string
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="color-scheme" content="light dark">
     <title>${escapeHtml(title)}</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@600&family=Open+Sans:ital,wght@0,300..800;1,300..800&display=swap">
     <link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}">
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%92%AC%3C/text%3E%3C/svg%3E">
     ${scriptTags}
@@ -230,9 +226,7 @@ export function createViews({ assistantName, assistantLanguage }: ViewOptions): 
         title: `Sign in — ${assistantName}`,
         bodyClass: 'centered',
         body: `    <main class="card">
-      <img class="brand brand--card" src="/header_ny.jpg?v=${ASSET_VERSION}" width="523" height="119"
-           alt="Nyenrode Business Universiteit">
-      <h1>${name}</h1>
+      <h1 class="wordmark">${name}</h1>
       <p class="muted">Enter your email address. If it is on the user list, we will send you a sign-in link.</p>
       ${notice(options)}
       <form method="post" action="/login" class="stack">
@@ -255,8 +249,7 @@ ${passwordField}
         title: `Check your inbox — ${assistantName}`,
         bodyClass: 'centered',
         body: `    <main class="card">
-      <img class="brand brand--card" src="/header_ny.jpg?v=${ASSET_VERSION}" width="523" height="119"
-           alt="Nyenrode Business Universiteit">
+      <p class="wordmark wordmark--small">${name}</p>
       <h1>Check your inbox</h1>
       <p class="muted">
         If <strong>${escapeHtml(email)}</strong> is on the user list, a sign-in link is on its way.
@@ -278,8 +271,6 @@ ${passwordField}
       <aside class="sidebar" id="sidebar">
         <div class="sidebar__head">
           <div class="sidebar__brand">
-            <img class="brand" src="/header_ny.jpg?v=${ASSET_VERSION}" width="523" height="119"
-                 alt="Nyenrode Business Universiteit">
             <span class="brand__assistant">${label}</span>
           </div>
           <button type="button" class="icon-button" id="new-conversation" title="New conversation" aria-label="New conversation">+</button>
@@ -339,8 +330,7 @@ ${assistants
         body: `    <main class="page page--picker">
       <header class="page__head">
         <div class="page__brand">
-          <img class="brand brand--page" src="/header_ny.jpg?v=${ASSET_VERSION}" width="523" height="119"
-               alt="Nyenrode Business Universiteit">
+          <p class="wordmark wordmark--small">${assistantName}</p>
           <h1>Choose a coachbot</h1>
         </div>
         <div class="row">

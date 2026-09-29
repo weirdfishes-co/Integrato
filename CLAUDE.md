@@ -58,12 +58,13 @@ src/
     repo.ts          all SQL, parameterized
     migrations/      forward-only .sql files
 public/              styles.css, app.js, upload.js (frontend, no build step)
+public/fonts/        Montserrat + Lato, self-hosted — no CDN font request
 scripts/build.mjs    esbuild bundle to dist/ + copy migrations
 scripts/entrypoint.sh  takes ownership of /data, then drops to the node user
 tests/               vitest: auth, content, context, settings, features
                      (memory + compaction), views, mail, assistants
                      (slugs, rights matrix, isolation)
-STYLE.md             styleguide of record (Dev Ieffe); not yet applied to the CSS
+STYLE.md             styleguide of record (Dev Ieffe); public/styles.css implements it
 instr.md             system prompt — the user owns its content
 instr.example.md     neutral starting prompt, safe to copy over instr.md
 context/*.md         knowledge base seeded into a brand-new assistant

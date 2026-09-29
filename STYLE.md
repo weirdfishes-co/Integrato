@@ -129,10 +129,10 @@ same values as 768. In practice: **phone, tablet, desktop**.
 
 ---
 
-## 5. Applying it here
+## 5. As applied here
 
-This app names its colours semantically in `public/styles.css` and maps the brand onto
-them. The equivalent mapping for this palette:
+`public/styles.css` implements this guide. It names its colours semantically and binds
+them to the palette above:
 
 ```css
 :root {
@@ -151,15 +151,23 @@ them. The equivalent mapping for this palette:
 }
 ```
 
-Three gaps to settle before this can be applied wholesale:
+Three things the source does not provide had to be decided. Each is marked in the
+stylesheet where it appears:
 
-1. **No hover or focus colours.** The site declares none beyond the focus ring, so
-   `--primary-600` above is a darkened guess rather than a documented value.
-2. **No status colours.** Error and success notices need a red and a green from outside
-   this palette.
-3. **No dark theme.** The four section themes are a *layout* device on one light page, not
-   a light/dark pair. A `prefers-color-scheme: dark` variant has to be invented — the
-   "Dark" section theme above (paper text on a dark ground) is the closest starting point.
+1. **Hover and focus colours.** The site declares none beyond the focus ring, so the `-600`
+   values are darkened from their base rather than taken from the source.
+2. **Status colours.** The site has no red or green at all. `#b3261e` and `#1e6b3a` were
+   chosen to sit apart from both the brown and the blue; both clear AA on white.
+3. **A dark theme.** The four section themes are a *layout* device on one light page, not a
+   light/dark pair, so the dark variant follows the "Dark" section: paper text on an ink
+   ground, with white as the accent because the blue disappears against it.
 
-Self-hosting Montserrat and Lato is preferable to the Google Fonts link the site uses: it
-removes a third-party request and keeps the app working offline.
+Of the four section themes the app adopts the **Accent** one — brown headings, blue filled
+buttons. The Light theme's white-on-white buttons give a primary action too little weight
+in an interface people work in.
+
+Montserrat and Lato are **self-hosted** from `public/fonts/` rather than loaded from the
+Google Fonts link the site uses: no third-party request, and it works offline.
+
+Every pairing was checked for contrast; the lowest is the green at 6.52:1, and everything
+else clears AAA.
