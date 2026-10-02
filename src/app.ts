@@ -8,6 +8,7 @@ import { createAuth } from './auth.js';
 import type { Config } from './config.js';
 import type { ContentPaths } from './content.js';
 import type { Db } from './db/index.js';
+import { createCipher } from './crypto.js';
 import { createRepo, type Repo } from './db/repo.js';
 import { createChatClient } from './llm.js';
 import { logger } from './logger.js';
@@ -15,7 +16,9 @@ import { createMailer } from './mail.js';
 import { createAdminRouter } from './routes/admin.js';
 import { createAuthRouter } from './routes/auth.js';
 import { createChatRouter } from './routes/chat.js';
+import { createNoteRouter } from './routes/notes.js';
 import { createContentRouter } from './routes/content.js';
+import { createConversationsRouter } from './routes/conversations.js';
 import { createViews } from './views.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -42,7 +45,7 @@ export function createApp(config: Config, db: Db): App {
     instructionsPath: join(projectRoot, 'instr.md'),
   };
 
-  const repo = createRepo(db);
+  const repo = createRepo(db, createCipher(config.emailEncryptionKey));
   const auth = createAuth(config, repo);
   const mailer = createMailer(config);
   const chat = createChatClient(config);
@@ -72,6 +75,14 @@ export function createApp(config: Config, db: Db): App {
   app.use(createAuthRouter({ config, repo, auth, mailer, views }));
   app.use(createAdminRouter({ config, repo, auth, views, bundledContent }));
   app.use('/admin/assistants/:id/content', createContentRouter({ auth, views, config, repo }));
+  app.use(
+    '/admin/assistants/:id/conversations',
+    createConversationsRouter({ auth, views, config, repo }),
+  );
+  // Before the chat router: both live under /<slug>, and this one owns the
+  // deeper paths. Express would not confuse them, but reading them in this
+  // order says which is the more specific.
+  app.use(createNoteRouter({ config, repo, auth, views }));
   app.use(createChatRouter({ config, repo, auth, chat, views }));
 
   app.use((req, res) => {

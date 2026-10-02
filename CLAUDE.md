@@ -45,15 +45,18 @@ src/
   assistants.ts      slugs, per-assistant paths, first-run migration
   balance.ts         OpenRouter credit + key-limit status for /admin
   anonymize.ts       masks personal data in user text, in-process
+  notes.ts           the user's own documents: validation + prompt section
   memory.ts          cross-conversation memory: extraction + prompt section
   compaction.ts      summarizes old turns once a conversation gets long
   content.ts         read/write the knowledge base + path validation + seeding
   context.ts         builds the system prompt from instr.md + context/*.md
-  mail.ts            magic-link delivery over Brevo's HTTP API, or the log
+  mail.ts            magic-link delivery over Brevo's or Mailjet's HTTP API, or the log
+  crypto.ts          AES-256-GCM + HMAC blind index for stored email addresses
   logger.ts          pino instance shared by every module
   rate-limit.ts      in-memory limiter for the login form
   views.ts           server-side HTML (everything through escapeHtml)
-  routes/            auth.ts, chat.ts, admin.ts, content.ts
+  routes/            auth.ts, chat.ts, admin.ts, content.ts, notes.ts
+    access.ts        resolves :slug against the rights matrix, shared
   db/
     index.ts         connection + migrations (in-process at boot)
     repo.ts          all SQL, parameterized
@@ -61,6 +64,7 @@ src/
 public/              styles.css, app.js, upload.js (frontend, no build step)
   markdown.js        renders an answer's Markdown; escapes first, always
   format.js          tokens and cost as text; its own module so it is testable
+  editor.js          the document editor's live preview, via markdown.js
 public/fonts/        Montserrat + Lato, self-hosted — no CDN font request
 STYLE.md             styleguide of record; public/styles.css implements it
 scripts/build.mjs    esbuild bundle to dist/ + copy migrations
@@ -68,7 +72,7 @@ scripts/entrypoint.sh  takes ownership of /data, then drops to the node user
 tests/               vitest: auth, content, context, settings, features
                      (memory + compaction), views, mail, assistants
                      (slugs, rights matrix, isolation), privacy
-                     (anonymization + EU routing), markdown, usage
+                     (anonymization + EU routing), markdown, usage, notes
 instr.md             system prompt — the user owns its content
 instr.example.md     neutral starting prompt, safe to copy over instr.md
 context/*.md         knowledge base seeded into a brand-new assistant
@@ -244,11 +248,63 @@ context/*.md         knowledge base seeded into a brand-new assistant
   concatenate. What is *not* counted: memory extraction and compaction are
   separate calls, so an exchange's true cost is higher than the line under it
   says. That is documented in the README rather than papered over.
+- **"Notes" in the code, "documents" on the screen.** The same split as chatbot
+  and assistant, and for the same reason: `content.ts` already owns the word
+  document for the *admin's* knowledge base, which lives on the volume and is
+  shared by everyone who may use a chatbot. A user's own documents are a
+  different thing with a different owner — one user, one chatbot — so they are
+  `notes` in the table, the repo and `notes.ts`, and "My documents" in the
+  interface. Keep new user-facing text on documents and the identifiers on notes.
+- **A user's documents live in the database, not on the volume.** The
+  per-assistant directories under `ASSISTANTS_DIR` are shared by every user of
+  that chatbot, which is the wrong boundary: these reach nobody but their
+  author. Every statement in the repo carries `user_id` **and** `assistant_id`,
+  like conversations and memories, and `updateNote` returns null rather than
+  throwing when the row is not the caller's — the route reads that as a 404.
+- **The documents go after the cached knowledge base**, exactly like memory, and
+  for the same reason: a per-user block in front of the shared prefix would
+  invalidate the prompt cache for everyone on every request. `routes/chat.ts`
+  builds both in one `Promise.all` and joins what is not null.
+- **A document is the user's material, not an instruction.** `notesSection` says
+  so in the prompt, because a model otherwise follows a document that happens to
+  read like an order. It is prompt-enforced, so it is a strong default and not a
+  guarantee — the same class of thing as `CITATION_RULE`.
+- **A full prompt drops the oldest document, not the request.**
+  `MAX_NOTES_PROMPT_CHARS` is a budget filled newest-first, and the names of
+  what was left out go into the prompt so the chatbot can say a document is not
+  loaded. Letting the prompt grow instead would fail a request months after the
+  document that caused it was written, which is close to undiagnosable.
+- **A chatbot without the setting answers 404, not 403**, on the document
+  addresses — `resolveWritable` in `routes/notes.ts`. Whether a feature is
+  switched on is not worth telling an unauthorized caller, and it keeps those
+  paths indistinguishable from a chatbot that does not exist, which is already
+  the rule for the chatbot itself.
+- **`createAssistantResolver` is shared, deliberately.** The 404-not-403 rule
+  for `:slug` is encoded once in `routes/access.ts` and used by both the chat
+  and the document routes. It was duplicated for about an hour and that is
+  exactly the kind of check that drifts when it exists twice — a new router
+  under `/<slug>` should use it rather than writing its own.
+- **Email addresses are encrypted at rest, and looked up by a blind index.**
+  `users.email_enc` holds AES-256-GCM (`crypto.ts`, random IV, so every
+  ciphertext differs); `users.email_hash` is an HMAC of the normalized address
+  under a *second* key derived from the same secret, which is what lookups and
+  the UNIQUE constraint use. Encryption alone could not do either. Consequences:
+  the user list is sorted in JS after decrypting, nothing can `LIKE`-search an
+  address in SQL, and `EMAIL_ENCRYPTION_KEY` is required — **lose or change it
+  and every address is gone** (the hash would no longer match either). The
+  plaintext `email` column is a leftover: `protectEmails()` converts pre-006 rows
+  at boot and nulls it. It does not hide who is a user from someone with both the
+  database *and* the key, and addresses are still written to the log by `routes/auth.ts` (failed
+  admin attempts, unknown addresses, mail failures) and, in development, by
+  the mailer — encrypting the table does not cover the logs.
 - **Memory goes after the knowledge base in the system prompt**, never before.
   The knowledge base is the cached prefix shared by every user; putting a
   per-user block in front of it would invalidate the cache for everyone on every
   request.
-- **Mail over Brevo's HTTP API, and nothing else.** Railway could open no TCP
+- **Mail over an HTTP API, and nothing else** — Brevo or Mailjet, chosen by
+  which credentials are set. With both set the app refuses to boot unless
+  `MAIL_PROVIDER` names one (`chooseMailProvider` in `config.ts`): a silent pick
+  would leave the other key looking live in the environment. Railway could open no TCP
   connection to Brevo's SMTP port — `Connection timeout` at the `CONN` stage on
   587, 2525 and 465 alike, before any credential was exchanged, while the
   identical configuration worked from a laptop. Port 443 has no such problem.
@@ -263,8 +319,16 @@ context/*.md         knowledge base seeded into a brand-new assistant
   `002` rather than another settings key.
 - **One directory per assistant** under `ASSISTANTS_DIR`
   (`<slug>/instr.md`, `<slug>/context/*.md`). The slug is derived from the name
-  once, at creation, and never changes — it is both the URL (`/<slug>`) and the
-  directory name, so renaming an assistant must not move its files.
+  at creation, and the *name* can change freely without touching it. An admin
+  can edit the slug itself on the identity form; it is both the URL (`/<slug>`)
+  and the directory name, so `renameAssistantSlug()` in `assistants.ts` moves the
+  folder first and the row second, and moves the folder back if the row is
+  refused. The old address goes into `assistant_slug_history` and
+  `createAssistantResolver` 301-redirects GET pages from it (never `/api/`, which
+  a reload fixes) — only to a user who may use that chatbot, so the redirect
+  leaks nothing a 404 would hide. A live slug always beats a history row. A
+  deleted chatbot's folder stays on the volume, so a rename onto an existing
+  folder is refused rather than merging two knowledge bases.
 - **An assistant lives at the root, `/<slug>`**, which makes its slug compete
   with every fixed path. `RESERVED_SLUGS` in `assistants.ts` therefore refuses
   `admin`, `api`, `login` and the rest: Express matches the fixed routes first,
@@ -295,19 +359,31 @@ context/*.md         knowledge base seeded into a brand-new assistant
   "Loading failed: Not found". Any change to the frontend/API contract has the
   same failure mode, so leave the version in place.
 - **The styling follows STYLE.md, through a token layer.** `public/styles.css`
-  binds semantic names (`--bg`, `--text`, `--accent`, …) to that palette, so a
-  restyle touches the tokens and the type scale and nothing below them. Three
-  things the guide's source does not have were decided here and are marked where
-  they appear: hover colours (darkened from their base), a status palette (the
-  source has no red or green), and a dark theme (built from its own dark
-  section — paper on ink, white as the accent).
-- **Brown is the button, blue is the link.** The two accents split between the
-  two roles rather than sharing one. Two places cannot follow the button colour,
-  both for contrast: in dark mode the brown sits at 2.04:1 against the ink
-  ground, so it lightens to `#a35a09`; and the sidebar's new-conversation button
-  sits on the blue, where the brown is 1.44:1, so it takes a white fill instead.
-  **Check contrast before changing any of these** — several pairings here are
-  chosen, not inherited.
+  names the five palette colours once and binds everything else to them
+  semantically (`--bg`, `--text`, `--accent`, …), so a restyle touches the
+  tokens and the type scale and nothing below them — the move from the Dev Ieffe
+  blue-and-brown to Forest Green and Brown was 60 lines of tokens and no
+  component at all. Colour comes from the palette; **type, shape and
+  breakpoints are still the reverse-engineered g.ieffe.dev values**, which is
+  why STYLE.md says so at the top.
+  What the palette does not supply was decided here and is marked where it
+  appears: the page ground and every tint (all five palette colours are dark —
+  there is no light tone in it), hover states, a red and an amber for status,
+  and the dark theme.
+- **Brown is the button, green is the link.** The palette's two usable hues
+  split between the two roles rather than sharing one, so a primary action and a
+  link are distinguishable without reading either. Two places cannot follow the
+  button colour, both for contrast: in dark mode the brown sits at **1.48:1**
+  against the ink ground, so it lightens to `#a89b84` and takes *dark* text
+  (white on a brown light enough to see is about 3:1). The label being the
+  ground colour means one figure covers both the label on the fill and the fill
+  on the page: 4.95:1, which has to clear 4.5 because a 14px bold button label
+  is not "large text"; and the sidebar's new-conversation button sits
+  on the sage, where the brown is **1.76:1**, so it takes a white fill with a
+  forest glyph (9.65:1). **Check contrast before changing any of these** — most
+  pairings here are chosen, not inherited, and this palette has no slack: its
+  five colours span 5.18:1 to 13.53:1 on white and the widest gap between any
+  two of them is 2.61:1, so no palette colour can sit on another.
 - **A link is bold and coloured, not underlined** — except inside a sentence.
   `.link` (the rows of actions, the breadcrumbs, the names in a table) carries
   its affordance in weight and colour, because it stands alone with no prose to
@@ -315,16 +391,22 @@ context/*.md         knowledge base seeded into a brand-new assistant
   bold blue alone is not enough to pick it out of a paragraph. On the sidebar
   the same rule holds in white; there hover has no colour left to move to, so
   it is the one place that underlines.
-- **The sidebar is a lighter step of the blue** (`--sidebar-bg`, `#1a6b9c`; the
-  deep navy in dark mode). White on it is 5.79:1, which is what keeps the bold
-  white links AA — do not lighten it further. Conversation rows have **no hover
-  fill**: only the row you are in is marked, and a second highlight following
-  the pointer made the list restless. The pointer still reveals that row's
-  delete button, which is the affordance that mattered.
+- **The sidebar takes the sage** (`--sidebar-bg`, `#5f725d`), the lightest of
+  the five, in both themes. White on it is **5.18:1**, which is what keeps the
+  bold white links AA — **do not lighten it further**, that figure is the floor
+  and the palette offers nothing between sage and white. Conversation rows have
+  **no hover fill**: only the row you are in is marked, and a second highlight
+  following the pointer made the list restless. The pointer still reveals that
+  row's delete button, which is the affordance that mattered.
 - **Controls size themselves, and so does a chat message.** STYLE.md puts body
   copy at 20px, which is right for prose and far too big for a form or a long
   answer. Buttons, fields, tables and `.message` set their own size rather than
   inheriting it; a table matches the links inside it.
+- **The sign-in email repeats the brand colours as literals** (`BRAND` in
+  `mail.ts`). No mail client fetches a stylesheet and many strip `<style>`
+  blocks, so these cannot come from the token layer — which means a palette
+  change has to be made in two places, and `tests/mail.test.ts` pins the hexes
+  so the second one is not forgotten.
 - **Fonts are self-hosted** from `public/fonts/` (Montserrat 700, Lato 400/700,
   65 kB). No CDN request, and it works offline. There is no logo: the product
   name is set as text, which is also why the sign-in email carries no image at
@@ -340,6 +422,36 @@ context/*.md         knowledge base seeded into a brand-new assistant
 - **No Capacitor/Android.** Deliberately skipped: cookie sessions and magic
   links work poorly in a WebView. If it is ever wanted, the route is token auth
   alongside cookies + a static build of the frontend.
+
+## Configuration reference
+
+Environment (read once in `config.ts`, failing fast; the template is
+`.env.example`, the table for operators is in [README.md](README.md)):
+
+| Variable | Default | Rule |
+| --- | --- | --- |
+| `DATABASE_URL`, `OPENROUTER_API_KEY`, `ADMIN_EMAILS`, `ADMIN_PASSWORD`, `EMAIL_ENCRYPTION_KEY` | — | required; password ≥ 12 chars in production, key ≥ 32 chars always |
+| `APP_URL` | — | public URL; `https://` sets the Secure cookie flag |
+| `BREVO_API_KEY` / `MAILJET_API_KEY` + `MAILJET_SECRET_KEY` | — | one provider required in production; half a Mailjet pair is refused |
+| `MAIL_PROVIDER` | — | `brevo` \| `mailjet`; required only when both are configured |
+| `MAIL_FROM` | `<name> <noreply@localhost>` | must be provider-verified |
+| `ASSISTANT_NAME`, `ASSISTANT_LANGUAGE` | — / `English` | seed the first assistant only |
+| `ASSISTANTS_DIR` | `./data/assistants` (`/data/assistants` in the image) | keep on the volume; never relative when deployed |
+| `OPENROUTER_MODEL`, `MODEL_EFFORT`, `MODEL_MAX_TOKENS` | `anthropic/claude-opus-5`, `high`, `8000` | fallback until an admin saves settings |
+| `OPENROUTER_SITE_URL`, `OPENROUTER_SITE_NAME` | — / assistant name | attribution only |
+| `SESSION_DAYS`, `LOGIN_TOKEN_MINUTES` | `30`, `30` | |
+| `PORT`, `NODE_ENV`, `LOG_LEVEL` | `3000`, `development`, `info` | |
+
+Per-assistant settings (the `assistant_settings` table, `settings.ts`, saved on
+`/admin/assistants/:id`; read with `loadSettings`, never from `config`):
+`model`, `effort`, `show_thinking`, `web_search`, `web_search_max_results`
+(≤ 20, default 5), `web_search_include_domains` / `_exclude_domains`, `memory`,
+`citations`, `compaction`, `notes` (users' own documents), `eu_only`,
+`anonymize`, `admin_conversation_log`, `temperature`, `top_p` (the last two
+empty = send nothing). Identity lives on the `assistants` row instead: `name`,
+`slug`, `description`, `language`, `welcome`. A new key needs its entry in
+`KEYS`, `loadSettings`, `saveSettings`, the form in `views.ts`, the route in
+`routes/admin.ts`, and a row in the README table.
 
 ## Pitfalls
 
@@ -395,9 +507,11 @@ context/*.md         knowledge base seeded into a brand-new assistant
   not just against the model: a value your balance cannot cover fails the whole
   request with a 402 before the model runs.
 - **`MAIL_FROM` is not an SMTP setting** and survived the removal: it is parsed
-  into Brevo's `sender` object, and the address must be one Brevo has verified.
-  Left unset it becomes `noreply@localhost`, which Brevo rejects.
-- **The Brevo call has a 15-second timeout.** `fetch` has none by default, and a
+  into the provider's sender object, and the address must be one the provider
+  has verified. Left unset it becomes `noreply@localhost`, which both reject.
+  Mailjet can answer 200 and still refuse a message inside the body; `mail.ts`
+  reads that per-message outcome.
+- **The mail call has a 15-second timeout.** `fetch` has none by default, and a
   hanging send leaves `POST /login` with no response — the user sees an endless
   spinner rather than an error. This is the same failure SMTP used to produce
   when its port was blocked.

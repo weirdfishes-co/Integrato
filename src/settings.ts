@@ -27,12 +27,23 @@ export interface AssistantSettings {
   /** Summarize old turns instead of dropping them once a thread gets long. */
   compaction: boolean;
   /**
+   * Let users write their own documents for this chatbot, in the editor, and
+   * carry them in its prompt.
+   */
+  notes: boolean;
+  /**
    * Route only through providers that serve this model from an EU data centre.
    * Enforced on the request itself, not just in the model picker.
    */
   euOnly: boolean;
   /** Strip personal data out of user messages before they leave for the model. */
   anonymize: boolean;
+  /**
+   * Let an admin read every conversation with this chatbot from /admin, across
+   * all users. Stored messages are never anonymized regardless of `anonymize`
+   * above — that setting only affects what the model sees.
+   */
+  adminConversationLog: boolean;
   /**
    * Sampling knobs. `null` means "send nothing and let the model use its own
    * default", which is not the same as any number we could pick: several
@@ -53,8 +64,10 @@ const KEYS = {
   memory: 'memory',
   citations: 'citations',
   compaction: 'compaction',
+  notes: 'notes',
   euOnly: 'eu_only',
   anonymize: 'anonymize',
+  adminConversationLog: 'admin_conversation_log',
   temperature: 'temperature',
   topP: 'top_p',
 } as const;
@@ -141,8 +154,10 @@ export async function loadSettings(
     memory: readBoolean(stored, KEYS.memory, false),
     citations: readBoolean(stored, KEYS.citations, false),
     compaction: readBoolean(stored, KEYS.compaction, false),
+    notes: readBoolean(stored, KEYS.notes, false),
     euOnly: readBoolean(stored, KEYS.euOnly, false),
     anonymize: readBoolean(stored, KEYS.anonymize, false),
+    adminConversationLog: readBoolean(stored, KEYS.adminConversationLog, false),
     temperature: readNumber(stored, KEYS.temperature, MAX_TEMPERATURE),
     topP: readNumber(stored, KEYS.topP, MAX_TOP_P),
   };
@@ -164,8 +179,10 @@ export async function saveSettings(
   await repo.setSetting(assistantId, KEYS.memory, settings.memory ? '1' : '0');
   await repo.setSetting(assistantId, KEYS.citations, settings.citations ? '1' : '0');
   await repo.setSetting(assistantId, KEYS.compaction, settings.compaction ? '1' : '0');
+  await repo.setSetting(assistantId, KEYS.notes, settings.notes ? '1' : '0');
   await repo.setSetting(assistantId, KEYS.euOnly, settings.euOnly ? '1' : '0');
   await repo.setSetting(assistantId, KEYS.anonymize, settings.anonymize ? '1' : '0');
+  await repo.setSetting(assistantId, KEYS.adminConversationLog, settings.adminConversationLog ? '1' : '0');
   await repo.setSetting(assistantId, KEYS.temperature, settings.temperature === null ? '' : String(settings.temperature));
   await repo.setSetting(assistantId, KEYS.topP, settings.topP === null ? '' : String(settings.topP));
 }

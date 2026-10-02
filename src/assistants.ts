@@ -1,4 +1,5 @@
-import { join, resolve } from 'node:path';
+import { access, rename } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 
 import type { Config } from './config.js';
 import { seedContent, type ContentPaths } from './content.js';
@@ -90,6 +91,60 @@ export function assistantPaths(config: Config, slug: string): ContentPaths {
     throw new AssistantError(`Assistant slug escapes the root: ${slug}`);
   }
   return { contextDir: join(dir, 'context'), instructionsPath: join(dir, 'instr.md') };
+}
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Moves an assistant to a new address: the knowledge-base folder and the row
+ * change together, and the old address is kept as a redirect.
+ *
+ * The folder moves first. If the database then refuses, the folder is moved
+ * back, so a failure leaves nothing half-renamed. Throws AssistantError with a
+ * sentence an admin can act on.
+ */
+export async function renameAssistantSlug(
+  config: Config,
+  repo: Repo,
+  assistant: Assistant,
+  slug: string,
+): Promise<void> {
+  if (slug === assistant.slug) return;
+  if (!isValidSlug(slug)) {
+    throw new AssistantError(
+      'That address is not allowed: use lowercase letters, digits and hyphens, and avoid reserved words.',
+    );
+  }
+  const taken = await repo.findAssistantBySlug(slug);
+  if (taken) throw new AssistantError('Another chatbot already uses that address.');
+
+  const from = dirname(assistantPaths(config, assistant.slug).instructionsPath);
+  const to = dirname(assistantPaths(config, slug).instructionsPath);
+
+  // A deleted chatbot leaves its files behind on purpose, so the target folder
+  // may exist. Renaming onto it would silently merge two knowledge bases.
+  if (await exists(to)) {
+    throw new AssistantError('A knowledge-base folder for that address already exists on the volume.');
+  }
+
+  const moved = await exists(from);
+  if (moved) await rename(from, to);
+  try {
+    if (!(await repo.renameAssistantSlug(assistant.id, slug))) {
+      throw new AssistantError('Another chatbot already uses that address.');
+    }
+  } catch (error) {
+    if (moved) await rename(to, from);
+    throw error;
+  }
+  logger.info({ assistantId: assistant.id, from: assistant.slug, to: slug }, 'assistant address changed');
 }
 
 /**

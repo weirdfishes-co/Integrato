@@ -1,9 +1,14 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { closeAll, freshRepo } from './helpers/db.js';
 
 import {
   assistantPaths,
+  renameAssistantSlug,
   isValidSlug,
   slugify,
   uniqueSlug,
@@ -220,3 +225,68 @@ describe('per-assistant isolation', () => {
 });
 
 afterAll(closeAll);
+
+describe('changing an address', () => {
+  let repo: Repo;
+  let cfg: Config;
+
+  beforeEach(async () => {
+    repo = await freshRepo();
+    cfg = { assistantsDir: mkdtempSync(join(tmpdir(), 'assistants-')) } as Config;
+  });
+
+  function seed(slug: string): void {
+    mkdirSync(join(cfg.assistantsDir, slug, 'context'), { recursive: true });
+    writeFileSync(join(cfg.assistantsDir, slug, 'instr.md'), 'prompt');
+  }
+
+  it('moves the folder and the row, and keeps the old address as a redirect', async () => {
+    const coach = await repo.createAssistant('coach', 'Coach', '', 'English');
+    seed('coach');
+
+    await renameAssistantSlug(cfg, repo, coach, 'mentor');
+
+    expect((await repo.findAssistantById(coach.id))?.slug).toBe('mentor');
+    expect(existsSync(join(cfg.assistantsDir, 'mentor', 'instr.md'))).toBe(true);
+    expect(existsSync(join(cfg.assistantsDir, 'coach'))).toBe(false);
+    expect(await repo.findAssistantBySlug('coach')).toBeNull();
+    expect((await repo.findAssistantByFormerSlug('coach'))?.id).toBe(coach.id);
+  });
+
+  it('refuses an address another chatbot uses', async () => {
+    const coach = await repo.createAssistant('coach', 'Coach', '', 'English');
+    await repo.createAssistant('hr', 'HR', '', 'English');
+    seed('coach');
+
+    await expect(renameAssistantSlug(cfg, repo, coach, 'hr')).rejects.toThrow(AssistantError);
+    expect(existsSync(join(cfg.assistantsDir, 'coach'))).toBe(true);
+  });
+
+  it('refuses reserved and malformed addresses', async () => {
+    const coach = await repo.createAssistant('coach', 'Coach', '', 'English');
+
+    await expect(renameAssistantSlug(cfg, repo, coach, 'admin')).rejects.toThrow(AssistantError);
+    await expect(renameAssistantSlug(cfg, repo, coach, '../x')).rejects.toThrow(AssistantError);
+  });
+
+  it('refuses to merge into a folder that is already on the volume', async () => {
+    const coach = await repo.createAssistant('coach', 'Coach', '', 'English');
+    seed('coach');
+    seed('leftover');
+
+    await expect(renameAssistantSlug(cfg, repo, coach, 'leftover')).rejects.toThrow(AssistantError);
+    expect(existsSync(join(cfg.assistantsDir, 'coach', 'instr.md'))).toBe(true);
+    expect((await repo.findAssistantById(coach.id))?.slug).toBe('coach');
+  });
+
+  it('stops redirecting once the old address is taken back', async () => {
+    const coach = await repo.createAssistant('coach', 'Coach', '', 'English');
+    await renameAssistantSlug(cfg, repo, coach, 'mentor');
+    const renamed = (await repo.findAssistantById(coach.id))!;
+    await renameAssistantSlug(cfg, repo, renamed, 'coach');
+
+    expect((await repo.findAssistantBySlug('coach'))?.id).toBe(coach.id);
+    expect(await repo.findAssistantByFormerSlug('coach')).toBeNull();
+    expect((await repo.findAssistantByFormerSlug('mentor'))?.id).toBe(coach.id);
+  });
+});

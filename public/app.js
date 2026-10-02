@@ -36,7 +36,7 @@ const { usageLine, totalsLine } = await import(`./format.js?v=${assetVersion}`);
 /** Set per chatbot on its admin page; empty falls back to the sentence below. */
 const welcomeMessage =
   document.querySelector('.app')?.dataset.welcome?.trim() ||
-  'Ask your first question — answers are based on the supplied context.';
+  'This is an AI bot. It can be wrong or miss context, so treat answers as a starting point and use your own judgment before acting on anything important.';
 
 const state = {
   conversations: [],

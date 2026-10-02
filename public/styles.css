@@ -54,45 +54,78 @@
 
 :root {
   /* ---- palette (STYLE.md §1) ---- */
-  --primary: #0c4466;        /* accent blue: filled buttons */
-  --primary-600: #093349;    /* darkened; the source declares no hover */
-  --primary-900: #07293d;
-  --secondary: #783f04;      /* accent brown: headings */
-  --secondary-600: #5c3003;
-  --ink: #1c1c1c;
-  --paper: #f9f9f9;
-  --gray: #efefef;
-  --gray-150: #f3f3f3;
-  --gray-600: #d4d4d4;
-  --gray-800: #55565a;
-  --gray-900: #242424;
+  /*
+   * Forest Green and Brown. All five are dark earthy tones — the palette has
+   * no light colour at all, so the page ground and the tints below are ours.
+   * That is marked where it happens.
+   */
+  --sage: #5f725d;           /* the lightest of the five: the sidebar ground */
+  --forest: #2e4b36;         /* links and focus */
+  --charcoal: #353a31;       /* the near-black; dark-mode surfaces */
+  --brown: #4f473b;          /* buttons and headings */
+  --ink: #312e28;            /* body text, and the dark-mode ground */
 
-  /* Not in the source, which carries no status colours at all. Both clear AA
-     on white and read as neither the brown nor the blue. */
+  --forest-600: #243b2a;     /* darkened for hover; the palette declares none */
+  --forest-900: #1b2c1f;
+  --brown-600: #3e382e;
+
+  /*
+   * Not in the palette, which stops at five dark tones: a page needs something
+   * to put them on. The tints are mixed from the sage so the greys stay in the
+   * same family rather than reading as a second, colder palette.
+   */
+  --white: #ffffff;
+  --paper: #f7f6f3;          /* warm off-white: text on dark grounds */
+  --gray-50: #f2f4f1;
+  --gray-200: #e3e6e1;
+  --gray-400: #c8cec5;
+  --gray-700: #6b6459;       /* muted text: 5.85:1 on white */
+
+  /*
+   * Also ours: the palette carries no status colours. The red reads as neither
+   * the brown nor the green and clears AA on white. Success takes the brand
+   * green rather than inventing a second one — it is only ever a 4px border,
+   * never text, so there is nothing to confuse with a link.
+   */
   --red: #b3261e;
   --red-600: #8c1d17;
-  --green: #1e6b3a;
+  /* Low credit is a warning, not yet an error, so it is not the red. 5.93:1 on
+     white, and it reads as neither the brown nor the green. */
+  --amber: #8a5a00;
+  --green: var(--forest);
 
   /* ---- semantic surfaces ---- */
-  --bg: #ffffff;
-  --bg-subtle: var(--gray-150);
-  --bg-raised: #ffffff;
-  --border: var(--gray);
-  --border-strong: var(--gray-600);
-  --text: var(--ink);
-  --text-muted: var(--gray-800);
-  --heading: var(--secondary);
-  /* Buttons take the brown; links and focus keep the blue, so the two roles
-     stay distinguishable. White on this brown is 8.36:1. */
-  --accent: var(--secondary);
-  --accent-hover: var(--secondary-600);
-  --accent-text: #ffffff;
-  --bubble-user: var(--gray-150);
+  --bg: var(--white);
+  --bg-subtle: var(--gray-50);
+  --bg-raised: var(--white);
+  --border: var(--gray-200);
+  --border-strong: var(--gray-400);
+  --text: var(--ink);                /* 13.53:1 on the page */
+  --text-muted: var(--gray-700);
+  --heading: var(--brown);           /* 9.14:1 */
+  /*
+   * Buttons take the brown, links and focus the green, so the two roles stay
+   * distinguishable. White on this brown is 9.14:1.
+   */
+  --accent: var(--brown);
+  --accent-hover: var(--brown-600);
+  --accent-text: var(--white);
+  --bubble-user: var(--gray-50);
   --danger: var(--red);
   --danger-hover: var(--red-600);
   --danger-text: var(--red-600);
-  --focus: var(--primary);
-  --link: var(--primary);
+  --warning-text: var(--amber);
+  --focus: var(--forest);
+  --link: var(--forest);             /* 9.65:1 */
+
+  /* Kept for the few rules that still name them. */
+  --primary: var(--forest);
+  --primary-600: var(--forest-600);
+  --primary-900: var(--forest-900);
+  --secondary: var(--brown);
+  --secondary-600: var(--brown-600);
+  --gray: var(--gray-200);
+  --gray-600: var(--gray-400);
 
   /* ---- geometry (STYLE.md §3) ---- */
   --radius: 0;
@@ -116,39 +149,49 @@
 
   --transition: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
   --sidebar-width: 280px;
-  /* A lighter step of the accent blue, not a colour of its own: the deep navy
-     was too heavy beside the white chat. White on it is 5.79:1 (AA), which is
-     what holds the bold white links here legible. */
-  --sidebar-bg: #1a6b9c;
+  /* The lightest of the five, which is what the sidebar wants: a ground of its
+     own, lighter than the forest green but still dark enough to carry white.
+     White on it is 5.18:1 (AA) — do not lighten it further, that figure is what
+     keeps the bold white links here legible. */
+  --sidebar-bg: var(--sage);
   --sidebar-line: #ffffff47;
 }
 
 /*
- * Derived from the same palette: dark-blue grounds, yellow as the accent with
- * dark-blue text on it — the pairing the styleguide prescribes for secondary.
+ * Dark mode, built from the same five. The palette is already dark, so this is
+ * not an inversion: the ink becomes the ground, the warm off-white becomes the
+ * text, and the two accents have to come up to meet it.
  */
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: var(--ink);
-    --bg-subtle: var(--gray-900);
-    --bg-raised: var(--gray-900);
-    --border: #33343a;
-    --border-strong: #4a4b52;
-    --text: var(--paper);
-    --text-muted: #a9aaae;
+    --bg-subtle: var(--charcoal);
+    --bg-raised: var(--charcoal);
+    --border: #45493f;
+    --border-strong: #5a5f53;
+    --text: var(--paper);            /* 12.52:1 on the ground */
+    --text-muted: #a8a196;           /* 5.29:1 */
     --heading: var(--paper);
-    /* The brown has to lift off the ink ground: #783f04 against it is only
-       2.04:1, where this is 3.27:1 with white text at 5.22:1. */
-    --accent: #a35a09;
-    --accent-hover: #8f4b05;
-    --accent-text: #ffffff;
-    --bubble-user: #2e2f34;
+    /*
+     * The brown cannot be the button here: #4f473b against this ground is
+     * 1.48:1, which is no button at all. It lightens and takes *dark* text,
+     * because white on a brown light enough to see would be about 3:1 — the
+     * light-fill, dark-text pairing a dark section forces.
+     *
+     * Because the label is the ground colour, one number covers both jobs:
+     * 4.95:1 is the label against the fill *and* the fill against the page.
+     * It has to clear 4.5 — buttons here are 14px bold, which is not "large
+     * text", so 3:1 would not do.
+     */
+    --accent: #a89b84;
+    --accent-hover: #b5a892;
+    --accent-text: var(--ink);       /* 4.95:1 on the accent */
+    --bubble-user: #3a3f36;
     --danger-text: #f08d86;
+    --warning-text: #e0a955;         /* 6.43:1 on the ground */
+    /* The forest green disappears against the ink; white does not. */
     --focus: var(--paper);
     --link: var(--paper);
-    /* The light blue glares beside an ink page; dark mode keeps the deep
-       step. White on it is 11.63:1. */
-    --sidebar-bg: #123c56;
   }
 }
 
@@ -832,8 +875,8 @@ input[type='file'] {
 
 .sidebar .icon-button:hover,
 .sidebar .icon-button:focus {
-  background: #e4e4e4;
-  border-color: #e4e4e4;
+  background: #e8e6e0;
+  border-color: #e8e6e0;
   color: var(--primary-900);
 }
 
@@ -895,8 +938,15 @@ input[type='file'] {
   white-space: normal;
 }
 
-.conversation__open:hover,
-.conversation__open:focus {
+/*
+ * Prefixed with .sidebar for the specificity, not for the scope:
+ * `button:hover:not(:disabled)` is (0,2,1) and would otherwise outrank a plain
+ * `.conversation__open:hover` at (0,2,0) and paint the row with the brown
+ * accent — a conversation title is not a button being offered, it is a place
+ * you are going.
+ */
+.sidebar .conversation__open:hover,
+.sidebar .conversation__open:focus {
   background: none;
   color: #ffffff;
 }
@@ -909,9 +959,9 @@ input[type='file'] {
   opacity: 0;
 }
 
-.conversation__delete:hover,
-.conversation__delete:focus {
-  background: var(--primary);
+.sidebar .conversation__delete:hover,
+.sidebar .conversation__delete:focus {
+  background: var(--forest-600);
   color: #ffffff;
 }
 
@@ -1197,8 +1247,17 @@ input[type='file'] {
   padding-top: var(--space-4);
   /* The setup strip sits below and carries the bottom inset instead. */
   padding-bottom: var(--space-4);
-  /* Centres the field on the message column while the rule still spans the
-     whole pane — a rule that stopped at the form's width read as a stray line. */
+  /*
+   * Centres the field on the message column while the rule still spans the
+   * whole pane — a rule that stopped at the form's width read as a stray line.
+   *
+   * `ch` is relative to the font size of the element it is written on, so this
+   * only lines up with `.message`'s own 65ch while the two agree on that size.
+   * They did not for a while: the messages were set to 0.9375rem and this was
+   * still measuring against the 20px body copy, which made the column ~490px
+   * and the field ~780px. Change one of these two sizes and change the other.
+   */
+  font-size: 0.9375rem;
   padding-inline: max(var(--space-4), (100% - (65ch + 8rem)) / 2);
 }
 
@@ -1349,7 +1408,7 @@ input[type='file'] {
 }
 
 .balance--empty .balance__amount { color: var(--danger-text); }
-.balance--low .balance__amount { color: var(--bordeaux); }
+.balance--low .balance__amount { color: var(--warning-text); }
 
 .balance__detail {
   display: grid;
@@ -1370,13 +1429,7 @@ input[type='file'] {
   color: var(--danger-text);
 }
 
-.balance--low .balance__warning { color: var(--bordeaux); }
-
-/* Bordeaux vanishes against the navy ground; yellow is the dark-mode warning. */
-@media (prefers-color-scheme: dark) {
-  .balance--low .balance__amount,
-  .balance--low .balance__warning { color: var(--secondary); }
-}
+.balance--low .balance__warning { color: var(--warning-text); }
 
 /* ---------- assistant picker ---------- */
 
@@ -1581,4 +1634,100 @@ input[type='file'] {
     gap: 0;
     margin-bottom: var(--space-2);
   }
+}
+
+/* ---------- the document editor ---------- */
+
+/*
+ * A user's own documents. The editor is deliberately plain: a textarea and a
+ * live preview, with no toolbar — people paste into this far more often than
+ * they compose in it, and a toolbar that formats a selection is a promise the
+ * markdown behind it has to keep.
+ */
+.page--editor {
+  max-width: 72rem;
+}
+
+.editor {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.editor__meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+/* Side by side while there is room; stacked when there is not. */
+.editor__panes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.editor__write textarea {
+  min-height: 28rem;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.editor__preview {
+  display: grid;
+  gap: var(--space-2);
+}
+
+/*
+ * The preview matches the field beside it rather than the page: it has to look
+ * like a pane of the editor, and it holds the same text as the textarea.
+ */
+.editor__preview .message__body--rich {
+  min-height: 28rem;
+  max-height: 40rem;
+  overflow-y: auto;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+  font-size: 0.9375rem;
+}
+
+/* The same weight and size as a <label>, without claiming to label a field. */
+.field__label {
+  font-family: var(--font-heading);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.editor__actions {
+  align-items: center;
+  gap: var(--space-4);
+}
+
+@media (max-width: 860px) {
+  .editor__meta,
+  .editor__panes {
+    grid-template-columns: 1fr;
+  }
+
+  /* Stacked, the preview is below the fold anyway; give it less room. */
+  .editor__preview .message__body--rich {
+    min-height: 12rem;
+  }
+}
+
+/* A tag on the document list. */
+.tag {
+  display: inline-block;
+  padding: 0 0.375rem;
+  border: 1px solid var(--border-strong);
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+  color: var(--text-muted);
+  white-space: nowrap;
 }

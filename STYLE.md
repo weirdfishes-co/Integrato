@@ -1,59 +1,59 @@
-# Dev Ieffe — Styleguide
+# Unlimited Brain — Styleguide
 
-Reverse-engineered from the live site (https://g.ieffe.dev), September 2026.
+**Colour comes from the "Forest Green and Brown" palette**
+(https://colorschemes.net/palettes/forest-green-and-brown), adopted October 2026.
 
-The site is built on **Google Sites**, so there is no authored stylesheet to read: the
-framework CSS is a 1.8 MB generated file and the theme is injected inline as a block of
-rules on obfuscated class names (`.duRjpb`, `.QmpIrf`, …). Those names are generated and
-will change without warning, so **none of them appear below**. What follows is the design
-itself — palette, type, shape — taken verbatim from the values the theme sets.
+**Type, shape and breakpoints** were reverse-engineered from https://g.ieffe.dev in
+September 2026 and are unchanged — that site is built on Google Sites, so there was no
+authored stylesheet to read: the theme is injected inline on obfuscated class names
+(`.duRjpb`, `.QmpIrf`, …) that are generated and will change without warning, so **none
+of them appear below**. What follows is the design itself, taken from the values the
+theme set.
 
-Sizes on the site are declared in **points**. Each is given below in pt as found, with the
-px equivalent (pt × 4/3) to use directly in CSS.
+Sizes there are declared in **points**. Each is given below in pt as found, with the px
+equivalent (pt × 4/3) to use directly in CSS.
 
 ---
 
 ## 1. Colors
 
-The theme uses no CSS custom properties; every colour is a literal. Collected from the
-rendered page and the inline theme:
+Five colours, and **every one of them is dark**. That is the defining fact about this
+palette: there is no light tone in it at all.
 
-| Role | Hex | Where it appears |
-| --- | --- | --- |
-| **Ink** | `#1c1c1c` | Default body and heading colour on light sections |
-| **Black** | `#000000` | Headings and filled buttons in the black section theme |
-| **Paper** | `#f9f9f9` | Text on dark grounds, and the light section background |
-| **White** | `#ffffff` | Section backgrounds, outlined-button fill |
-| **Accent brown** | `#783f04` | Headings in the accent section theme |
-| **Accent blue** | `#0c4466` | Filled and outlined buttons in the accent section theme |
-| **Lavender tint** | `#f7f5fe` | Default filled-button background |
-| **Cream** | `#fff2cc` | Occasional block background |
-| **Grey 100** | `#efefef` | Block background |
-| **Grey 150** | `#f3f3f3` | Block background |
-| **Grey 900** | `#242424` | Deep block background, just off black |
-
-There is no red, green or amber: the site carries **no status palette at all**. Anything
-here needing success/warning/error will have to introduce it, and should do so in a
-hue that does not collide with the brown or the blue.
-
-### Section themes
-
-Rather than one page-wide palette, the site paints in **four section themes**. Each sets
-its own heading colour and button treatment, and every theme is used about equally across
-the page.
-
-| Theme | Headings | Filled button | Outlined button |
+| Role here | Hex | Palette name | On white |
 | --- | --- | --- | --- |
-| Black | `#000000` | `#000000` bg, `#f9f9f9` text | transparent, `#000000` text and border |
-| Accent | `#783f04` | `#0c4466` bg, `#f9f9f9` text | transparent, `#0c4466` text and border |
-| Light | `#1c1c1c` | `#ffffff` bg, `#1c1c1c` text and border | transparent, `#1c1c1c` text and border |
-| Dark | `#f9f9f9` | `#ffffff` bg, `#1c1c1c` text | transparent, `#f9f9f9` text and border |
+| **Sage** | `#5f725d` | Soft sage green — the lightest of the five | 5.18:1 |
+| **Forest** | `#2e4b36` | Rich forest green | 9.65:1 |
+| **Charcoal** | `#353a31` | Dark brown (it reads as a green-black) | 11.66:1 |
+| **Brown** | `#4f473b` | Muted brown | 9.14:1 |
+| **Ink** | `#312e28` | Dark grayish brown | 13.53:1 |
 
-The pattern worth copying: a section decides its own ground, and the heading and button
-colours follow from it. That is the same shape as a `prefers-color-scheme` block — one set
-of semantic names, several bindings.
+The palette's own description — vintage, muted, calming, earthy — is carried by how close
+together they sit. Sage to ink is a span of 13.53 to 5.18 against white, so all five work
+as *marks on a light ground* and none of them works as a ground for another: the largest
+contrast between any two of them is sage against ink, at 2.61:1.
 
----
+### What had to be added
+
+A page needs something to put these on, and the palette supplies nothing. These are ours:
+
+| Token | Hex | Why |
+| --- | --- | --- |
+| White | `#ffffff` | The page ground, and text on every one of the five |
+| Paper | `#f7f6f3` | Warm off-white; text on dark grounds, where white is too stark |
+| Tints | `#f2f4f1`, `#e3e6e1`, `#c8cec5` | Surfaces and borders, mixed from the sage so the greys stay in the family |
+| Muted text | `#6b6459` | From the brown's family, deliberately *not* the sage — muted text next to green links must not read as a link |
+| Red | `#b3261e` | There is no status colour in the palette |
+| Amber | `#8a5a00` | A low balance is a warning, not yet an error |
+
+Success is the brand **forest** green rather than a sixth colour: it appears only as a
+4px border, never as text, so there is nothing to confuse with a link.
+
+### The two roles
+
+**Brown is the button, green is the link.** The palette's two usable hues split between
+the two jobs instead of sharing one, which is what lets a reader tell a primary action
+from a link without reading either.
 
 ## 2. Typography
 
@@ -131,43 +131,43 @@ same values as 768. In practice: **phone, tablet, desktop**.
 
 ## 5. As applied here
 
-`public/styles.css` implements this guide. It names its colours semantically and binds
-them to the palette above:
+`public/styles.css` implements this guide. The five palette colours are named once and
+everything else is bound to them semantically, so a restyle touches the tokens and
+nothing below them:
 
 ```css
 :root {
-  --primary: #0c4466;        /* accent blue: filled buttons */
-  --primary-600: #093349;    /* darkened for hover; the site defines no hover state */
-  --secondary: #783f04;      /* accent brown: headings in the accent theme */
-  --text: #1c1c1c;
-  --bg: #ffffff;
-  --bg-subtle: #f3f3f3;
-  --bg-raised: #ffffff;
-  --border: #efefef;
+  --sage: #5f725d;           /* the sidebar ground */
+  --forest: #2e4b36;         /* links and focus */
+  --charcoal: #353a31;       /* dark-mode surfaces */
+  --brown: #4f473b;          /* buttons and headings */
+  --ink: #312e28;            /* body text, and the dark-mode ground */
+
+  --accent: var(--brown);    /* white on it: 9.14:1 */
+  --link: var(--forest);     /* 9.65:1 */
+  --text: var(--ink);        /* 13.53:1 */
   --radius: 0;               /* square, everywhere */
-  --radius-card: 0;
-  --font-heading: Montserrat, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  --font-body: Lato, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 }
 ```
 
-Three things the source does not provide had to be decided. Each is marked in the
+Three places needed a decision the palette does not make, and each is marked in the
 stylesheet where it appears:
 
-1. **Hover and focus colours.** The site declares none beyond the focus ring, so the `-600`
-   values are darkened from their base rather than taken from the source.
-2. **Status colours.** The site has no red or green at all. `#b3261e` and `#1e6b3a` were
-   chosen to sit apart from both the brown and the blue; both clear AA on white.
-3. **A dark theme.** The four section themes are a *layout* device on one light page, not a
-   light/dark pair, so the dark variant follows the "Dark" section: paper text on an ink
-   ground, with white as the accent because the blue disappears against it.
+1. **Hover and focus.** The palette declares no states, so the `-600` values are
+   darkened from their base.
+2. **The sidebar.** It takes the **sage**, the lightest of the five, as a ground of its
+   own, with bold white links at 5.18:1. That figure is the floor: lightening the sage
+   any further takes the links below AA.
+3. **Dark mode.** Not an inversion — the palette is already dark, so the **ink** becomes
+   the ground and the paper off-white becomes the text. The brown cannot stay the button
+   there: against the ink it is 1.48:1, which is no button at all. It lightens to
+   `#a89b84` and takes *dark* text, because white on a brown light enough to see would
+   be about 3:1. Since the label is the ground colour, one figure covers both jobs —
+   **4.95:1** is the label on the fill and the fill on the page — and it has to clear
+   4.5, because a 14px bold button label is not "large text".
 
-Of the four section themes the app adopts the **Accent** one — brown headings, blue filled
-buttons. The Light theme's white-on-white buttons give a primary action too little weight
-in an interface people work in.
+Montserrat and Lato are **self-hosted** from `public/fonts/`: no third-party request, and
+it works offline.
 
-Montserrat and Lato are **self-hosted** from `public/fonts/` rather than loaded from the
-Google Fonts link the site uses: no third-party request, and it works offline.
-
-Every pairing was checked for contrast; the lowest is the green at 6.52:1, and everything
-else clears AAA.
+Every pairing was checked for contrast. The lowest in use is the sage sidebar's white
+links at 5.18:1 (AA); body text, links, headings and buttons all clear AAA.

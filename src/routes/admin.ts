@@ -3,6 +3,8 @@ import { Router, type Request, type Response } from 'express';
 import {
   assistantPaths,
   provisionAssistant,
+  renameAssistantSlug,
+  AssistantError,
   slugify,
   uniqueSlug,
   MAX_DESCRIPTION_LENGTH,
@@ -102,10 +104,11 @@ export function createAdminRouter({
     assistant: Assistant,
     notice: { message?: string; error?: string } = {},
   ): Promise<string> {
-    const [settings, users, grantedUserIds] = await Promise.all([
+    const [settings, users, grantedUserIds, usage] = await Promise.all([
       loadSettings(repo, config, assistant.id),
       repo.listUsers(),
       repo.listGrantedUserIds(assistant.id),
+      repo.usageByUser(assistant.id),
     ]);
     const models = await modelChoices(settings.euOnly);
 
@@ -119,6 +122,7 @@ export function createAdminRouter({
       maxTopP: MAX_TOP_P,
       users,
       grantedUserIds,
+      usage,
     });
   }
 
@@ -214,6 +218,19 @@ export function createAdminRouter({
       return;
     }
 
+    // Empty means "leave the address alone", so an older cached form cannot
+    // blank it.
+    const slug = text(req.body, 'slug').toLowerCase();
+    if (slug.length > 0 && slug !== assistant.slug) {
+      try {
+        await renameAssistantSlug(config, repo, assistant, slug);
+      } catch (error) {
+        if (!(error instanceof AssistantError)) throw error;
+        res.status(400).type('html').send(await renderAssistant(assistant, { error: error.message }));
+        return;
+      }
+    }
+
     await repo.updateAssistant(assistant.id, name, description, language, welcome);
     logger.info({ by: req.user!.id, assistantId: assistant.id }, 'assistant updated');
     res.redirect(`/admin/assistants/${assistant.id}?ok=${encodeURIComponent('Identity saved.')}`);
@@ -247,8 +264,10 @@ export function createAdminRouter({
       memory: checked(req.body, 'memory'),
       citations: checked(req.body, 'citations'),
       compaction: checked(req.body, 'compaction'),
+      notes: checked(req.body, 'notes'),
       euOnly: checked(req.body, 'eu_only'),
       anonymize: checked(req.body, 'anonymize'),
+      adminConversationLog: checked(req.body, 'admin_conversation_log'),
       temperature: parseSampling(text(req.body, 'temperature'), MAX_TEMPERATURE),
       topP: parseSampling(text(req.body, 'top_p'), MAX_TOP_P),
     };

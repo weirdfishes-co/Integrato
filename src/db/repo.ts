@@ -1,5 +1,6 @@
 import type { Db } from './index.js';
 import { normalizeEmail } from '../config.js';
+import type { Cipher } from '../crypto.js';
 
 /**
  * Thin data layer on top of PostgreSQL. All SQL lives here and is
@@ -42,6 +43,11 @@ export interface Conversation {
   summarizedThrough: number | null;
 }
 
+/** A conversation plus who it belongs to, for the admin conversation log. */
+export interface ConversationWithUser extends Conversation {
+  userEmail: string;
+}
+
 export interface Memory {
   id: number;
   userId: number;
@@ -68,6 +74,24 @@ export interface Message {
  * `cost` is the provider's own figure in US dollars, not a price we computed
  * from a rate card — which is why it is worth storing rather than deriving.
  */
+/**
+ * A document the user wrote themselves, in the editor, for one chatbot.
+ *
+ * Distinct from the knowledge base in `content.ts`: that is the admin's, lives
+ * on the volume and is shared by everyone who may use the chatbot. This belongs
+ * to one user and reaches only their own conversations.
+ */
+export interface Note {
+  id: number;
+  userId: number;
+  assistantId: number;
+  name: string;
+  tags: string[];
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface MessageUsage {
   promptTokens: number;
   completionTokens: number;
@@ -78,9 +102,23 @@ export interface MessageUsage {
   cost: number;
 }
 
+/**
+ * One user's totals against one assistant, for the admin usage panel.
+ * `cost` is null, never 0, when nothing was reported — matching how a single
+ * message's usage is already null-not-zero (see MessageUsage/toUsage).
+ */
+export interface UserUsage {
+  userId: number;
+  email: string;
+  answerCount: number;
+  promptTokens: number;
+  completionTokens: number;
+  cost: number | null;
+}
+
 interface UserRow {
   id: number;
-  email: string;
+  email_enc: string;
   is_admin: boolean;
   created_at: string;
   last_seen_at: string | null;
@@ -107,12 +145,37 @@ interface ConversationRow {
   updated_at: string;
 }
 
+interface ConversationWithUserRow extends ConversationRow {
+  user_email_enc: string;
+}
+
+/** COUNT/SUM come back as bigint/numeric text; the driver's parsing is off. */
+interface UserUsageRow {
+  user_id: number;
+  email_enc: string;
+  answer_count: string;
+  prompt_tokens: string;
+  completion_tokens: string;
+  cost: string | null;
+}
+
 interface MemoryRow {
   id: number;
   user_id: number;
   assistant_id: number;
   content: string;
   created_at: string;
+}
+
+interface NoteRow {
+  id: number;
+  user_id: number;
+  assistant_id: number;
+  name: string;
+  tags: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
 }
 
 interface MessageRow {
@@ -143,10 +206,10 @@ function requireTime(value: string): string {
   return toTime(value) ?? '';
 }
 
-function toUser(row: UserRow): User {
+function toUser(row: UserRow, cipher: Cipher): User {
   return {
     id: row.id,
-    email: row.email,
+    email: cipher.decrypt(row.email_enc),
     isAdmin: row.is_admin,
     createdAt: requireTime(row.created_at),
     lastSeenAt: toTime(row.last_seen_at),
@@ -178,6 +241,21 @@ function toConversation(row: ConversationRow): Conversation {
   };
 }
 
+function toConversationWithUser(row: ConversationWithUserRow, cipher: Cipher): ConversationWithUser {
+  return { ...toConversation(row), userEmail: cipher.decrypt(row.user_email_enc) };
+}
+
+function toUserUsage(row: UserUsageRow, cipher: Cipher): UserUsage {
+  return {
+    userId: row.user_id,
+    email: cipher.decrypt(row.email_enc),
+    answerCount: Number(row.answer_count),
+    promptTokens: Number(row.prompt_tokens),
+    completionTokens: Number(row.completion_tokens),
+    cost: row.cost === null ? null : Number(row.cost),
+  };
+}
+
 function toMemory(row: MemoryRow): Memory {
   return {
     id: row.id,
@@ -185,6 +263,19 @@ function toMemory(row: MemoryRow): Memory {
     assistantId: row.assistant_id,
     content: row.content,
     createdAt: requireTime(row.created_at),
+  };
+}
+
+function toNote(row: NoteRow): Note {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    assistantId: row.assistant_id,
+    name: row.name,
+    tags: row.tags.length === 0 ? [] : row.tags.split(','),
+    content: row.content,
+    createdAt: requireTime(row.created_at),
+    updatedAt: requireTime(row.updated_at),
   };
 }
 
@@ -215,25 +306,26 @@ function toUsage(row: MessageRow): MessageUsage | null {
   };
 }
 
-export function createRepo(db: Db) {
+export function createRepo(db: Db, cipher: Cipher) {
   return {
     // ---- users ------------------------------------------------------------
 
     async findUserByEmail(email: string): Promise<User | null> {
-      const row = await db.one<UserRow>('SELECT * FROM users WHERE email = $1', [
-        normalizeEmail(email),
+      const row = await db.one<UserRow>('SELECT * FROM users WHERE email_hash = $1', [
+        cipher.blindIndex(normalizeEmail(email)),
       ]);
-      return row ? toUser(row) : null;
+      return row ? toUser(row, cipher) : null;
     },
 
     async findUserById(id: number): Promise<User | null> {
       const row = await db.one<UserRow>('SELECT * FROM users WHERE id = $1', [id]);
-      return row ? toUser(row) : null;
+      return row ? toUser(row, cipher) : null;
     },
 
+    /** Sorted here: the column holds ciphertext, so the database cannot order it. */
     async listUsers(): Promise<User[]> {
-      const rows = await db.all<UserRow>('SELECT * FROM users ORDER BY email');
-      return rows.map(toUser);
+      const rows = await db.all<UserRow>('SELECT * FROM users');
+      return rows.map((row) => toUser(row, cipher)).sort((a, b) => a.email.localeCompare(b.email));
     },
 
     /**
@@ -242,14 +334,34 @@ export function createRepo(db: Db) {
      * ADMIN_EMAILS boot loop from being a lockout risk.
      */
     async upsertUser(email: string, isAdmin: boolean): Promise<User> {
+      const normalized = normalizeEmail(email);
       const row = await db.one<UserRow>(
-        `INSERT INTO users (email, is_admin) VALUES ($1, $2)
-         ON CONFLICT (email) DO UPDATE SET is_admin = users.is_admin OR excluded.is_admin
+        `INSERT INTO users (email_enc, email_hash, is_admin) VALUES ($1, $2, $3)
+         ON CONFLICT (email_hash) DO UPDATE SET is_admin = users.is_admin OR excluded.is_admin
          RETURNING *`,
-        [normalizeEmail(email), isAdmin],
+        [cipher.encrypt(normalized), cipher.blindIndex(normalized), isAdmin],
       );
-      if (!row) throw new Error(`Could not create user ${email}`);
-      return toUser(row);
+      if (!row) throw new Error('Could not create user');
+      return toUser(row, cipher);
+    },
+
+    /**
+     * Encrypts addresses written before migration 006 and clears the plaintext.
+     * Idempotent: a row that is already converted is not selected. Returns how
+     * many rows it converted.
+     */
+    async protectEmails(): Promise<number> {
+      const rows = await db.all<{ id: number; email: string }>(
+        'SELECT id, email FROM users WHERE email_enc IS NULL AND email IS NOT NULL',
+      );
+      for (const row of rows) {
+        const normalized = normalizeEmail(row.email);
+        await db.run(
+          'UPDATE users SET email_enc = $1, email_hash = $2, email = NULL WHERE id = $3',
+          [cipher.encrypt(normalized), cipher.blindIndex(normalized), row.id],
+        );
+      }
+      return rows.length;
     },
 
     async deleteUser(id: number): Promise<void> {
@@ -284,7 +396,7 @@ export function createRepo(db: Db) {
          SELECT u.* FROM users u JOIN consumed ON consumed.user_id = u.id`,
         [tokenHash],
       );
-      return row ? toUser(row) : null;
+      return row ? toUser(row, cipher) : null;
     },
 
     // ---- sessions ---------------------------------------------------------
@@ -304,7 +416,7 @@ export function createRepo(db: Db) {
          WHERE s.token_hash = $1 AND s.expires_at > now()`,
         [tokenHash],
       );
-      return row ? toUser(row) : null;
+      return row ? toUser(row, cipher) : null;
     },
 
     async deleteSession(tokenHash: string): Promise<void> {
@@ -357,6 +469,31 @@ export function createRepo(db: Db) {
         [userId, assistantId],
       );
       return rows.map(toConversation);
+    },
+
+    /** Across every user — for the admin conversation log, not a user's own view. */
+    async listConversationsForAssistant(assistantId: number): Promise<ConversationWithUser[]> {
+      const rows = await db.all<ConversationWithUserRow>(
+        `SELECT conversations.*, users.email_enc AS user_email_enc
+         FROM conversations
+         JOIN users ON users.id = conversations.user_id
+         WHERE conversations.assistant_id = $1
+         ORDER BY conversations.updated_at DESC, conversations.id DESC`,
+        [assistantId],
+      );
+      return rows.map((row) => toConversationWithUser(row, cipher));
+    },
+
+    /** Ignores ownership, like findConversationById — for the admin conversation log. */
+    async findConversationWithUser(id: number): Promise<ConversationWithUser | null> {
+      const row = await db.one<ConversationWithUserRow>(
+        `SELECT conversations.*, users.email_enc AS user_email_enc
+         FROM conversations
+         JOIN users ON users.id = conversations.user_id
+         WHERE conversations.id = $1`,
+        [id],
+      );
+      return row ? toConversationWithUser(row, cipher) : null;
     },
 
     async renameConversation(id: number, userId: number, title: string): Promise<void> {
@@ -425,6 +562,29 @@ export function createRepo(db: Db) {
       return rows.map(toMessage);
     },
 
+    /**
+     * Token and cost totals per user, for the admin usage panel. Only answers
+     * carry usage, so the join is to assistant messages alone; a user with no
+     * answers yet simply has no row, rather than one full of zeros.
+     */
+    async usageByUser(assistantId: number): Promise<UserUsage[]> {
+      const rows = await db.all<UserUsageRow>(
+        `SELECT users.id AS user_id, users.email_enc AS email_enc,
+                COUNT(messages.id) AS answer_count,
+                COALESCE(SUM(messages.prompt_tokens), 0) AS prompt_tokens,
+                COALESCE(SUM(messages.completion_tokens), 0) AS completion_tokens,
+                SUM(messages.cost) AS cost
+         FROM conversations
+         JOIN users ON users.id = conversations.user_id
+         JOIN messages ON messages.conversation_id = conversations.id AND messages.role = 'assistant'
+         WHERE conversations.assistant_id = $1
+         GROUP BY users.id, users.email_enc
+         ORDER BY cost DESC NULLS LAST, users.id`,
+        [assistantId],
+      );
+      return rows.map((row) => toUserUsage(row, cipher));
+    },
+
     // ---- assistants -------------------------------------------------------
 
     async listAssistants(): Promise<Assistant[]> {
@@ -468,6 +628,45 @@ export function createRepo(db: Db) {
         'UPDATE assistants SET name = $1, description = $2, language = $3, welcome = $4 WHERE id = $5',
         [name, description, language, welcome, id],
       );
+    },
+
+    /**
+     * Gives the assistant a new address and remembers the old one so that it
+     * can redirect. Returns false when another assistant already holds the
+     * slug (the UNIQUE constraint decides, so two concurrent renames cannot
+     * both win).
+     */
+    async renameAssistantSlug(id: number, slug: string): Promise<boolean> {
+      return db.transaction(async (tx) => {
+        const current = await tx.one<{ slug: string }>('SELECT slug FROM assistants WHERE id = $1 FOR UPDATE', [id]);
+        if (!current || current.slug === slug) return current !== null;
+
+        const changed = await tx.run(
+          'UPDATE assistants SET slug = $1 WHERE id = $2 AND NOT EXISTS (SELECT 1 FROM assistants WHERE slug = $1)',
+          [slug, id],
+        );
+        if (changed === 0) return false;
+
+        // The new address is live now, so it must not also redirect elsewhere.
+        await tx.run('DELETE FROM assistant_slug_history WHERE slug = $1', [slug]);
+        await tx.run(
+          `INSERT INTO assistant_slug_history (slug, assistant_id) VALUES ($1, $2)
+           ON CONFLICT (slug) DO UPDATE SET assistant_id = EXCLUDED.assistant_id, retired_at = now()`,
+          [current.slug, id],
+        );
+        return true;
+      });
+    },
+
+    /** The assistant that used to live at this address, if any. */
+    async findAssistantByFormerSlug(slug: string): Promise<Assistant | null> {
+      const row = await db.one<AssistantRow>(
+        `SELECT a.* FROM assistant_slug_history h
+         JOIN assistants a ON a.id = h.assistant_id
+         WHERE h.slug = $1`,
+        [slug],
+      );
+      return row ? toAssistant(row) : null;
     },
 
     /** Cascades to its conversations, memories, settings and grants. */
@@ -563,6 +762,76 @@ export function createRepo(db: Db) {
 
     async clearMemories(userId: number, assistantId: number): Promise<void> {
       await db.run('DELETE FROM memories WHERE user_id = $1 AND assistant_id = $2', [
+        userId,
+        assistantId,
+      ]);
+    },
+
+    // ---- notes (the user's own documents) ----------------------------------
+
+    /*
+     * Every statement below carries user_id *and* assistant_id, like the
+     * conversation and memory queries: the authorization is the WHERE clause,
+     * not a check beside it. Dropping either column crosses a boundary.
+     */
+
+    async listNotes(userId: number, assistantId: number): Promise<Note[]> {
+      const rows = await db.all<NoteRow>(
+        `SELECT * FROM notes
+         WHERE user_id = $1 AND assistant_id = $2
+         ORDER BY updated_at DESC, id DESC`,
+        [userId, assistantId],
+      );
+      return rows.map(toNote);
+    },
+
+    async findNote(id: number, userId: number, assistantId: number): Promise<Note | null> {
+      const row = await db.one<NoteRow>(
+        'SELECT * FROM notes WHERE id = $1 AND user_id = $2 AND assistant_id = $3',
+        [id, userId, assistantId],
+      );
+      return row ? toNote(row) : null;
+    },
+
+    async createNote(
+      userId: number,
+      assistantId: number,
+      name: string,
+      tags: readonly string[],
+      content: string,
+    ): Promise<Note> {
+      const row = await db.one<NoteRow>(
+        `INSERT INTO notes (user_id, assistant_id, name, tags, content)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING *`,
+        [userId, assistantId, name, tags.join(','), content],
+      );
+      if (!row) throw new Error('Could not create the document');
+      return toNote(row);
+    },
+
+    /** Null when the document is not this user's, which the caller reads as 404. */
+    async updateNote(
+      id: number,
+      userId: number,
+      assistantId: number,
+      name: string,
+      tags: readonly string[],
+      content: string,
+    ): Promise<Note | null> {
+      const row = await db.one<NoteRow>(
+        `UPDATE notes
+         SET name = $4, tags = $5, content = $6, updated_at = now()
+         WHERE id = $1 AND user_id = $2 AND assistant_id = $3
+         RETURNING *`,
+        [id, userId, assistantId, name, tags.join(','), content],
+      );
+      return row ? toNote(row) : null;
+    },
+
+    async deleteNote(id: number, userId: number, assistantId: number): Promise<void> {
+      await db.run('DELETE FROM notes WHERE id = $1 AND user_id = $2 AND assistant_id = $3', [
+        id,
         userId,
         assistantId,
       ]);

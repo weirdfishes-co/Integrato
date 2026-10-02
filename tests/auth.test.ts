@@ -119,6 +119,7 @@ describe('loadConfig', () => {
     ADMIN_EMAILS: 'Boss@Example.COM, second@example.com',
     ADMIN_PASSWORD: 'a-long-enough-secret',
     BREVO_API_KEY: 'xkeysib-test',
+    EMAIL_ENCRYPTION_KEY: 'test-only-encryption-key-0123456789abcdef',
   };
 
   it('normalizes and splits the admin list', async () => {
@@ -195,6 +196,25 @@ describe('loadConfig', () => {
   });
 });
 
+describe('loadConfig: email encryption key', () => {
+  const env = {
+    DATABASE_URL: 'postgres://localhost/test',
+    OPENROUTER_API_KEY: 'sk-or-test',
+    ADMIN_EMAILS: 'boss@example.com',
+    ADMIN_PASSWORD: 'a-long-enough-secret',
+  };
+
+  it('is required', async () => {
+    expect(() => loadConfig(env as NodeJS.ProcessEnv)).toThrow(/EMAIL_ENCRYPTION_KEY/);
+  });
+
+  it('must be long enough to mean something', async () => {
+    expect(() => loadConfig({ ...env, EMAIL_ENCRYPTION_KEY: 'short' } as NodeJS.ProcessEnv)).toThrow(
+      /EMAIL_ENCRYPTION_KEY/,
+    );
+  });
+});
+
 describe('admin password sign-in', () => {
   const env = {
     DATABASE_URL: 'postgres://localhost/test',
@@ -202,6 +222,7 @@ describe('admin password sign-in', () => {
     ADMIN_EMAILS: 'boss@example.com',
     ADMIN_PASSWORD: 'correct horse battery',
     BREVO_API_KEY: 'xkeysib-test',
+    EMAIL_ENCRYPTION_KEY: 'test-only-encryption-key-0123456789abcdef',
   } as NodeJS.ProcessEnv;
 
   let repo: Repo;
@@ -332,6 +353,7 @@ describe('verifyAdminPassword', () => {
     OPENROUTER_API_KEY: 'sk-or-test',
     ADMIN_EMAILS: 'boss@example.com',
     ADMIN_PASSWORD: 'a-long-enough-secret',
+    EMAIL_ENCRYPTION_KEY: 'test-only-encryption-key-0123456789abcdef',
   } as NodeJS.ProcessEnv);
 
   it('accepts the configured password', async () => {

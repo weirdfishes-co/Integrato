@@ -2,25 +2,33 @@ import type { Config } from './config.js';
 import { logger } from './logger.js';
 
 /**
- * Delivery of the sign-in link through Brevo's HTTP API.
+ * Delivery of the sign-in link over HTTP, through Brevo or Mailjet. Which one
+ * is decided in `config.ts` from what the environment holds.
  *
  * SMTP was removed: Railway could open no TCP connection to Brevo's SMTP port
  * on 587, 2525 or 465 — a connection timeout before any credential was
  * exchanged — while the same configuration worked from a laptop. Port 443 has
- * no such problem, so keeping a second transport only kept a second way to
- * fail.
+ * no such problem. That is also the bar a second provider has to clear, and
+ * why these are the HTTP APIs and not two SMTP hosts: a transport that only
+ * works in one environment is a second way to fail, not a fallback.
  *
- * Without a key, and outside production, the link goes to the log instead so
- * you can sign in with no mail account at all.
+ * With no provider configured, and outside production, the link goes to the
+ * log instead so you can sign in with no mail account at all.
  */
 
 export interface Mailer {
   sendMagicLink(to: string, link: string, minutesValid: number): Promise<void>;
 }
 
-// Brevo's own path for transactional mail; nothing here speaks SMTP.
+// Both providers' own paths for transactional mail; nothing here speaks SMTP.
 const BREVO_URL = 'https://api.brevo.com/v3/smtp/email';
-const BREVO_TIMEOUT_MS = 15_000;
+const MAILJET_URL = 'https://api.mailjet.com/v3.1/send';
+/*
+ * `fetch` has no timeout of its own, and a hanging send leaves POST /login
+ * with no response at all — an endless spinner rather than an error. This is
+ * the same failure SMTP used to produce when its port was blocked.
+ */
+const SEND_TIMEOUT_MS = 15_000;
 
 function escapeHtml(value: string): string {
   return value
@@ -57,12 +65,14 @@ interface Message {
  * fetches a stylesheet, and many strip <style> blocks entirely.
  */
 const BRAND = {
-  primary: '#0c4466',
-  paper: '#f9f9f9',
-  gray: '#f3f3f3',
-  border: '#efefef',
-  text: '#1c1c1c',
-  muted: '#55565a',
+  /* The forest green and the brown, as the stylesheet binds them. */
+  primary: '#2e4b36',
+  accent: '#4f473b',
+  paper: '#f7f6f3',
+  gray: '#f2f4f1',
+  border: '#e3e6e1',
+  text: '#312e28',
+  muted: '#6b6459',
 } as const;
 
 /** Web fonts do not load in mail clients, so these are only the fallbacks. */
@@ -123,7 +133,7 @@ export function buildMagicLinkEmail(appName: string, link: string, minutesValid:
               <td style="padding:24px 32px 0;">
                 <table role="presentation" cellpadding="0" cellspacing="0" border="0">
                   <tr>
-                    <td style="background:${BRAND.primary};border:1px solid ${BRAND.primary};">
+                    <td style="background:${BRAND.accent};border:1px solid ${BRAND.accent};">
                       <a href="${safeLink}"
                          style="display:inline-block;padding:10px 16px;font-size:16px;font-weight:700;text-decoration:none;color:${BRAND.paper};">
                         Sign in
@@ -178,6 +188,34 @@ export function buildMagicLinkEmail(appName: string, link: string, minutesValid:
   return { subject: `Your sign-in link for ${appName}`, html, text };
 }
 
+/**
+ * One POST, shared by both providers.
+ *
+ * The provider's own body is included in the error on a refusal: it is where
+ * the reason lives (an unverified sender, a quota, a bad key) and without it
+ * the caller sees a status code and nothing to act on.
+ */
+async function post(
+  url: string,
+  headers: Record<string, string>,
+  body: unknown,
+  provider: string,
+): Promise<unknown> {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json', ...headers },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(`${provider} rejected the email (${response.status}): ${detail.slice(0, 200)}`);
+  }
+
+  return response.json().catch(() => null);
+}
+
 function createBrevoMailer(config: Config, apiKey: string): Mailer {
   const appName = config.assistantName;
   const sender = parseSender(config.mail.from, appName);
@@ -186,45 +224,93 @@ function createBrevoMailer(config: Config, apiKey: string): Mailer {
     async sendMagicLink(to, link, minutesValid) {
       const message = buildMagicLinkEmail(appName, link, minutesValid);
 
-      const response = await fetch(BREVO_URL, {
-        method: 'POST',
-        headers: {
-          'api-key': apiKey,
-          'content-type': 'application/json',
-          accept: 'application/json',
-        },
-        body: JSON.stringify({
+      await post(
+        BREVO_URL,
+        { 'api-key': apiKey },
+        {
           sender: { name: sender.name, email: sender.email },
           to: [{ email: to }],
           subject: message.subject,
           htmlContent: message.html,
           textContent: message.text,
-        }),
-        signal: AbortSignal.timeout(BREVO_TIMEOUT_MS),
-      });
+        },
+        'Brevo',
+      );
 
-      if (!response.ok) {
-        // Brevo explains refusals in the body (unverified sender, quota, …);
-        // without it the caller only sees a status code.
-        const detail = await response.text().catch(() => '');
-        throw new Error(`Brevo rejected the email (${response.status}): ${detail.slice(0, 200)}`);
+      logger.info({ to, provider: 'brevo' }, 'magic link sent');
+    },
+  };
+}
+
+interface MailjetResponse {
+  Messages?: { Status?: unknown }[];
+}
+
+function createMailjetMailer(
+  config: Config,
+  credentials: { apiKey: string; secretKey: string },
+): Mailer {
+  const appName = config.assistantName;
+  const sender = parseSender(config.mail.from, appName);
+  // Mailjet authenticates with the key pair as HTTP Basic, not a header of its own.
+  const authorization = `Basic ${Buffer.from(`${credentials.apiKey}:${credentials.secretKey}`).toString('base64')}`;
+
+  return {
+    async sendMagicLink(to, link, minutesValid) {
+      const message = buildMagicLinkEmail(appName, link, minutesValid);
+
+      const body = (await post(
+        MAILJET_URL,
+        { authorization },
+        {
+          Messages: [
+            {
+              From: { Email: sender.email, Name: sender.name },
+              To: [{ Email: to }],
+              Subject: message.subject,
+              TextPart: message.text,
+              HTMLPart: message.html,
+            },
+          ],
+        },
+        'Mailjet',
+      )) as MailjetResponse | null;
+
+      /*
+       * Mailjet reports a per-message outcome *inside* a 200: a refused
+       * recipient is a `Status` other than "success" on an otherwise fine
+       * response. Trusting the status code alone would log "magic link sent"
+       * for mail that was never sent, and leave the user waiting for it.
+       */
+      const statuses = body?.Messages ?? [];
+      const failed = statuses.filter((entry) => entry.Status !== 'success');
+      if (statuses.length === 0 || failed.length > 0) {
+        throw new Error(
+          `Mailjet accepted the request but did not send it: ${JSON.stringify(body).slice(0, 200)}`,
+        );
       }
 
-      logger.info({ to }, 'magic link sent');
+      logger.info({ to, provider: 'mailjet' }, 'magic link sent');
     },
   };
 }
 
 export function createMailer(config: Config): Mailer {
-  if (config.mail.brevoApiKey) {
-    logger.info('sending sign-in links through the Brevo HTTP API');
-    return createBrevoMailer(config, config.mail.brevoApiKey);
+  // The provider was resolved at boot, so there is nothing to decide here and
+  // no way for the two sets of credentials to be ambiguous this far in.
+  switch (config.mail.provider) {
+    case 'brevo':
+      logger.info('sending sign-in links through the Brevo HTTP API');
+      return createBrevoMailer(config, config.mail.brevoApiKey!);
+    case 'mailjet':
+      logger.info('sending sign-in links through the Mailjet HTTP API');
+      return createMailjetMailer(config, config.mail.mailjet!);
+    default:
+      logger.warn('no mail provider configured — sign-in links are written to the log');
+      return {
+        async sendMagicLink(to, link) {
+          logger.info({ to, link }, 'SIGN-IN LINK (dev mode, not emailed)');
+        },
+      };
   }
-
-  logger.warn('no BREVO_API_KEY — sign-in links are written to the log instead of emailed');
-  return {
-    async sendMagicLink(to, link) {
-      logger.info({ to, link }, 'SIGN-IN LINK (dev mode, not emailed)');
-    },
-  };
 }

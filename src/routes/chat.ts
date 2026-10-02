@@ -1,15 +1,17 @@
-import { Router, type Request, type Response } from 'express';
+import { Router } from 'express';
 
+import { createAssistantResolver } from './access.js';
 import type { Auth } from '../auth.js';
 import { assistantPaths } from '../assistants.js';
 import { compactConversation, historyWithSummary } from '../compaction.js';
 import type { Config } from '../config.js';
 import { buildSystemPrompt } from '../context.js';
-import type { Assistant, MessageUsage, Repo } from '../db/repo.js';
+import type { MessageUsage, Repo } from '../db/repo.js';
 import type { ChatClient, SourceLink } from '../llm.js';
 import { ChatRefusalError, describeChatError } from '../llm.js';
 import { logger } from '../logger.js';
 import { memorySection, rememberExchange } from '../memory.js';
+import { notesSection } from '../notes.js';
 import { loadSettings } from '../settings.js';
 import type { Views } from '../views.js';
 
@@ -42,27 +44,7 @@ function deriveTitle(text: string): string {
 export function createChatRouter({ config, repo, auth, chat, views }: ChatRouteDeps): Router {
   const router = Router();
 
-  /**
-   * Resolves :slug and checks the rights matrix in one place. Answers the
-   * request itself and returns null when the assistant does not exist or the
-   * user may not use it — both as 404, so the two are indistinguishable to
-   * someone probing for assistant names.
-   */
-  async function resolveAssistant(req: Request, res: Response): Promise<Assistant | null> {
-    const slug = typeof req.params.slug === 'string' ? req.params.slug : '';
-    const assistant = await repo.findAssistantBySlug(slug);
-    const user = req.user!;
-
-    if (!assistant || !(await repo.canUseAssistant(user.id, user.isAdmin, assistant.id))) {
-      if (req.path.startsWith('/api/')) {
-        res.status(404).json({ error: 'Chatbot not found' });
-      } else {
-        res.status(404).type('html').send(views.errorPage(404, 'This chatbot does not exist.'));
-      }
-      return null;
-    }
-    return assistant;
-  }
+  const resolveAssistant = createAssistantResolver({ repo, views });
 
   /** The picker: what this user is allowed to talk to. */
   router.get('/', auth.requireUser, async (req, res) => {
@@ -172,10 +154,14 @@ export function createChatRouter({ config, repo, auth, chat, views }: ChatRouteD
         citations: settings.citations,
       });
 
-      // Memory goes after the cached knowledge base, so a new fact for one user
-      // does not invalidate the shared prompt prefix for everyone else.
-      const memories = settings.memory ? await memorySection(repo, user.id, assistant.id) : null;
-      const systemPrompt = memories ? `${basePrompt}\n\n${memories}` : basePrompt;
+      // Both of these go after the cached knowledge base, and for the same
+      // reason: they are per user, and a per-user block in front of the shared
+      // prefix would invalidate the prompt cache for everyone on every request.
+      const [memories, notes] = await Promise.all([
+        settings.memory ? memorySection(repo, user.id, assistant.id) : null,
+        settings.notes ? notesSection(repo, user.id, assistant.id) : null,
+      ]);
+      const systemPrompt = [basePrompt, memories, notes].filter((part) => part).join('\n\n');
 
       const conversationId = existing.id;
       const stored = await repo.addMessage(conversationId, 'user', prompt);

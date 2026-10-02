@@ -2,8 +2,9 @@ import { MAX_WELCOME_LENGTH } from './assistants.js';
 import type { Balance } from './balance.js';
 import { COMPACT_THRESHOLD } from './compaction.js';
 import type { DocumentSummary } from './content.js';
-import type { Assistant, User } from './db/repo.js';
+import type { Assistant, ConversationWithUser, Message, Note, User, UserUsage } from './db/repo.js';
 import type { ModelOption } from './models.js';
+import { MAX_NOTE_CHARS, MAX_NOTE_NAME, MAX_TAGS } from './notes.js';
 import type { AssistantSettings } from './settings.js';
 
 /**
@@ -127,6 +128,18 @@ function balancePanel(balance: Balance | null | undefined): string {
 }
 
 /** e.g. "Anthropic: Claude Opus 5 — 1000K ctx · $5/$25 per Mtok" */
+/**
+ * Longest chatbot name the sidebar shows. Names may be longer than this in the
+ * database — only what is drawn is cut, and the full name stays in the title
+ * attribute, so nothing is actually hidden.
+ */
+const MAX_BRAND_CHARS = 40;
+
+function shorten(value: string, max: number): string {
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1).trimEnd()}\u2026`;
+}
+
 /** One row of the footer under the chat: a label and what it is set to. */
 function settingRow(label: string, value: string, note?: string): string {
   return `          <div class="setup__row">
@@ -200,6 +213,22 @@ ${[
     'Remembers you between conversations',
     onOff(settings.memory),
   ),
+  settingRow(
+    'Your own documents',
+    onOff(settings.notes),
+    settings.notes ? 'sent along with every question you ask' : undefined,
+  ),
+  /*
+   * The row with the most at stake for the person reading it, so it is stated
+   * plainly rather than as the name of a setting.
+   */
+  settingRow(
+    'Administrators can read these conversations',
+    settings.adminConversationLog ? 'Yes' : 'No',
+    settings.adminConversationLog
+      ? 'every thread with this chatbot, not only your own'
+      : 'nobody else can open your conversations',
+  ),
   settingRow('Cites its documents', onOff(settings.citations)),
   settingRow('Summarizes long conversations', onOff(settings.compaction)),
 ].join('\n')}
@@ -231,6 +260,17 @@ export interface ContentPageOptions extends NoticeOptions {
   assistant: Assistant;
 }
 
+export interface ConversationsPageOptions extends NoticeOptions {
+  assistant: Assistant;
+}
+
+export interface ConversationPageOptions extends NoticeOptions {
+  assistant: Assistant;
+  conversation: ConversationWithUser;
+  /** Where the back-link and breadcrumb go. */
+  base: string;
+}
+
 export interface AssistantPageOptions extends NoticeOptions {
   models?: readonly ModelOption[];
   settings?: AssistantSettings;
@@ -241,6 +281,8 @@ export interface AssistantPageOptions extends NoticeOptions {
   /** Every user, with a tick for those granted this assistant. */
   users?: readonly User[];
   grantedUserIds?: readonly number[];
+  /** Token and cost totals per user who has talked to this chatbot. */
+  usage?: readonly UserUsage[];
 }
 
 export interface AdminPageOptions extends NoticeOptions {
@@ -291,7 +333,18 @@ export interface Views {
     base: string;
     notice?: NoticeOptions;
   }): string;
+  /** Admin-only: every conversation with one chatbot, across every user. */
+  conversationsPage(conversations: readonly ConversationWithUser[], options: ConversationsPageOptions): string;
+  conversationPage(messages: readonly Message[], options: ConversationPageOptions): string;
+  /** The user's own documents for one chatbot: the list, and the editor. */
+  notesPage(assistant: Assistant, notes: readonly Note[], options: NoticeOptions): string;
+  notePage(assistant: Assistant, note: Note | null, options: NotePageOptions): string;
   errorPage(status: number, message: string): string;
+}
+
+export interface NotePageOptions extends NoticeOptions {
+  /** What the user had typed, when a save came back with a complaint. */
+  draft?: { name: string; tags: string; content: string };
 }
 
 export function createViews({ assistantName, assistantLanguage }: ViewOptions): Views {
@@ -349,6 +402,7 @@ ${passwordField}
 
     chatPage(user, assistant, showBackToPicker, settings) {
       const label = escapeHtml(assistant.name);
+      const brand = escapeHtml(shorten(assistant.name, MAX_BRAND_CHARS));
       return layout({
         title: assistant.name,
         scripts: ['/app.js'],
@@ -359,7 +413,7 @@ ${passwordField}
       <aside class="sidebar" id="sidebar">
         <div class="sidebar__head">
           <div class="sidebar__brand">
-            <span class="brand__assistant">${label}</span>
+            <span class="brand__assistant" title="${label}">${brand}</span>
           </div>
           <button type="button" class="icon-button" id="new-conversation" title="New conversation" aria-label="New conversation">+</button>
         </div>
@@ -367,6 +421,11 @@ ${passwordField}
         <div class="sidebar__foot">
           <span class="muted small" title="${escapeHtml(user.email)}">${escapeHtml(user.email)}</span>
           <div class="row">
+            ${
+              settings.notes
+                ? `<a class="link small" href="/${escapeHtml(assistant.slug)}/documents">Documents</a>`
+                : ''
+            }
             ${showBackToPicker ? '<a class="link small" href="/">Chatbots</a>' : ''}
             ${user.isAdmin ? '<a class="link small" href="/admin">Admin</a>' : ''}
             <form method="post" action="/logout"><button type="submit" class="link small">Sign out</button></form>
@@ -581,6 +640,24 @@ ${(options.effortLevels ?? [])
         )
         .join('\n');
 
+      const usage = options.usage ?? [];
+      const usageRows =
+        usage.length === 0
+          ? `          <tr><td colspan="4" class="muted">No answers yet.</td></tr>`
+          : usage
+              .map(
+                (row) => `          <tr>
+            <td>${escapeHtml(row.email)}</td>
+            <td>${row.answerCount}</td>
+            <td>${(row.promptTokens + row.completionTokens).toLocaleString('en-US')}</td>
+            <td>${row.cost === null ? '<span class="muted small">not recorded</span>' : money(row.cost)}</td>
+          </tr>`,
+              )
+              .join('\n');
+      const usageTotalCost = usage.some((row) => row.cost !== null)
+        ? money(usage.reduce((sum, row) => sum + (row.cost ?? 0), 0))
+        : null;
+
       return layout({
         title: `${assistant.name} — admin`,
         body: `    <main class="page">
@@ -588,6 +665,11 @@ ${(options.effortLevels ?? [])
         <h1>${escapeHtml(assistant.name)}</h1>
         <div class="row">
           <a class="link" href="/admin/assistants/${assistant.id}/content">Knowledge base</a>
+          ${
+            settings?.adminConversationLog
+              ? `<a class="link" href="/admin/assistants/${assistant.id}/conversations">Conversations</a>`
+              : ''
+          }
           <a class="link" href="/${escapeHtml(assistant.slug)}">Open chat</a>
           <a class="link" href="/admin">← Admin</a>
         </div>
@@ -613,11 +695,16 @@ ${(options.effortLevels ?? [])
           <div class="field">
             <label for="welcome">Welcome message</label>
             <textarea id="welcome" name="welcome" rows="4" maxlength="${MAX_WELCOME_LENGTH}"
-                      placeholder="Ask your first question — answers are based on the supplied context."
+                      placeholder="This is an AI bot. It can be wrong or miss context, so treat answers as a starting point and use your own judgment before acting on anything important."
                       >${escapeHtml(assistant.welcome)}</textarea>
             <p class="muted small">Shown in an empty conversation, at most ${MAX_WELCOME_LENGTH} characters. Leave it empty for the default sentence.</p>
           </div>
-          <p class="muted small">Address: <code>/${escapeHtml(assistant.slug)}</code> — fixed once created.</p>
+          <div class="field">
+            <label for="slug">Address</label>
+            <input id="slug" name="slug" type="text" required maxlength="50"
+                   pattern="[a-z0-9]([a-z0-9\-]*[a-z0-9])?" value="${escapeHtml(assistant.slug)}">
+            <p class="muted small">Lowercase letters, digits and hyphens. Changing it moves the knowledge base to match; the old address keeps redirecting here.</p>
+          </div>
           <button type="submit">Save identity</button>
         </form>
       </section>
@@ -626,6 +713,14 @@ ${(options.effortLevels ?? [])
         <h2>Chatbot settings</h2>
         <p class="muted small">Applies to this chatbot only, from the next message on.</p>
         <form method="post" action="/admin/assistants/${assistant.id}/settings" class="settings">
+
+          <label class="checkbox">
+            <input type="checkbox" name="eu_only" value="1"${settings?.euOnly ? ' checked' : ''}>
+            Only use providers in the EU
+          </label>
+          <p class="muted small">Restricts every request to endpoints served from an EU or EEA data centre, and forbids falling back to any other. The model list below then shows only models that have one.</p>
+
+          <hr>
 
           <div class="field">
             <label for="model">Model</label>
@@ -701,12 +796,6 @@ ${(options.effortLevels ?? [])
           <hr>
 
           <label class="checkbox">
-            <input type="checkbox" name="eu_only" value="1"${settings?.euOnly ? ' checked' : ''}>
-            Only use providers in the EU
-          </label>
-          <p class="muted small">Restricts every request to endpoints served from an EU or EEA data centre, and forbids falling back to any other. The model list above then shows only models that have one.</p>
-
-          <label class="checkbox">
             <input type="checkbox" name="anonymize" value="1"${settings?.anonymize ? ' checked' : ''}>
             Anonymize messages before sending them
           </label>
@@ -728,13 +817,41 @@ ${(options.effortLevels ?? [])
           <p class="muted small">The chatbot marks which document a statement came from, like [Guidelines.md].</p>
 
           <label class="checkbox">
+            <input type="checkbox" name="notes" value="1"${settings?.notes ? ' checked' : ''}>
+            Let users write their own documents
+          </label>
+          <p class="muted small">Adds a Markdown editor, so a user can write or paste text instead of asking a question. Their documents are carried in this chatbot's prompt — per user, so nobody sees anyone else's.</p>
+
+          <label class="checkbox">
             <input type="checkbox" name="compaction" value="1"${settings?.compaction ? ' checked' : ''}>
             Summarize long conversations
           </label>
           <p class="muted small">Past ${COMPACT_THRESHOLD} messages the oldest are folded into a summary instead of being dropped.</p>
 
+          <hr>
+
+          <label class="checkbox">
+            <input type="checkbox" name="admin_conversation_log" value="1"${
+              settings?.adminConversationLog ? ' checked' : ''
+            }>
+            Let admins read conversations with this chatbot
+          </label>
+          <p class="muted small">Adds a "Conversations" page under this chatbot in /admin, listing every user's threads. Stored messages are always the original text — anonymization above only changes what the model sees, never what is kept here.</p>
+
           <button type="submit">Save settings</button>
         </form>
+      </section>
+
+      <section class="panel">
+        <h2>Usage</h2>
+        <p class="muted small">Token and cost totals per user, from every answer this chatbot has given. Cost is OpenRouter's own figure, and does not include memory extraction or compaction calls.</p>
+        <table class="table">
+          <thead><tr><th>Email</th><th>Answers</th><th>Tokens</th><th>Cost</th></tr></thead>
+          <tbody>
+${usageRows}
+          </tbody>
+        </table>
+        ${usageTotalCost ? `<p class="muted small">Total: ${usageTotalCost}</p>` : ''}
       </section>
 
       <section class="panel">
@@ -863,6 +980,212 @@ ${rows}
         <div class="row">
           <button type="submit">Save</button>
           <a class="link" href="${options.base}">Cancel</a>
+        </div>
+      </form>
+    </main>`,
+      });
+    },
+
+    conversationsPage(conversations, options) {
+      const base = `/admin/assistants/${options.assistant.id}/conversations`;
+      const rows =
+        conversations.length === 0
+          ? `          <tr><td colspan="3" class="muted">No conversations yet.</td></tr>`
+          : conversations
+              .map(
+                (conversation) => `          <tr>
+            <td><a class="link" href="${base}/${conversation.id}">${escapeHtml(
+              conversation.title || '(untitled)',
+            )}</a></td>
+            <td>${escapeHtml(conversation.userEmail)}</td>
+            <td class="muted small">${escapeHtml(conversation.updatedAt)}</td>
+          </tr>`,
+              )
+              .join('\n');
+
+      return layout({
+        title: `Conversations — ${options.assistant.name}`,
+        body: `    <main class="page">
+      <header class="page__head">
+        <h1>Conversations — ${escapeHtml(options.assistant.name)}</h1>
+        <div class="row">
+          <a class="link" href="/admin/assistants/${options.assistant.id}">← ${escapeHtml(
+            options.assistant.name,
+          )}</a>
+          <a class="link" href="/admin">Admin</a>
+        </div>
+      </header>
+      <p class="muted small">Every thread kept for this chatbot, across every user. Stored text is never anonymized, regardless of that setting.</p>
+      ${notice(options)}
+
+      <section class="panel">
+        <table class="table">
+          <thead><tr><th>Title</th><th>User</th><th>Last message</th></tr></thead>
+          <tbody>
+${rows}
+          </tbody>
+        </table>
+      </section>
+    </main>`,
+      });
+    },
+
+    conversationPage(messages, options) {
+      const turns =
+        messages.length === 0
+          ? `        <p class="muted small">No messages.</p>`
+          : messages
+              .map(
+                (message) => `        <div class="message message--${message.role}">
+          <p class="muted small">${message.role === 'user' ? 'User' : 'Assistant'} · ${escapeHtml(
+                  message.createdAt,
+                )}</p>
+          <p>${escapeHtml(message.content)}</p>
+        </div>`,
+              )
+              .join('\n');
+
+      return layout({
+        title: `${options.conversation.title || 'Conversation'} — ${options.assistant.name}`,
+        body: `    <main class="page">
+      <header class="page__head">
+        <h1>${escapeHtml(options.conversation.title || '(untitled)')}</h1>
+        <div class="row">
+          <a class="link" href="${options.base}">← Conversations</a>
+          <a class="link" href="/admin/assistants/${options.assistant.id}">${escapeHtml(
+            options.assistant.name,
+          )}</a>
+        </div>
+      </header>
+      <p class="muted small">Started by ${escapeHtml(options.conversation.userEmail)}, updated ${escapeHtml(
+        options.conversation.updatedAt,
+      )}.</p>
+      ${notice(options)}
+
+      <section class="panel stack">
+${turns}
+      </section>
+    </main>`,
+      });
+    },
+
+    notesPage(assistant, notes, options) {
+      const base = `/${escapeHtml(assistant.slug)}/documents`;
+      const rows =
+        notes.length === 0
+          ? `          <tr><td colspan="4" class="muted">No documents yet. Write your first one below.</td></tr>`
+          : notes
+              .map(
+                (note) => `          <tr>
+            <td><a class="link" href="${base}/${note.id}">${escapeHtml(note.name)}</a></td>
+            <td>${
+              note.tags.length === 0
+                ? '<span class="muted">—</span>'
+                : note.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join(' ')
+            }</td>
+            <td class="muted">${escapeHtml(note.updatedAt.slice(0, 10))}</td>
+            <td class="row">
+              <a class="link small" href="${base}/${note.id}">Edit</a>
+              <form method="post" action="${base}/${note.id}/delete"
+                    onsubmit="return confirm('Delete &quot;${escapeHtml(note.name)}&quot;?')">
+                <button type="submit" class="link small danger">Delete</button>
+              </form>
+            </td>
+          </tr>`,
+              )
+              .join('\n');
+
+      return layout({
+        title: `Documents — ${assistant.name}`,
+        body: `    <main class="page">
+      <header class="page__head">
+        <div class="page__brand">
+          <p class="wordmark wordmark--small">${escapeHtml(assistant.name)}</p>
+          <h1>Documents</h1>
+        </div>
+        <div class="row">
+          <a class="link" href="/${escapeHtml(assistant.slug)}">← Back to the chat</a>
+        </div>
+      </header>
+      ${notice(options)}
+
+      <section class="panel">
+        <p class="muted small">Everything here is sent along with your questions to
+          ${escapeHtml(assistant.name)}, so it knows what you wrote. Only you can see these
+          documents, and they are not shared with any other chatbot.</p>
+        <table class="table">
+          <thead><tr><th>Name</th><th>Tags</th><th>Updated</th><th></th></tr></thead>
+          <tbody>
+${rows}
+          </tbody>
+        </table>
+        <div class="row">
+          <a class="link" href="${base}/new">Write a new document</a>
+        </div>
+      </section>
+    </main>`,
+      });
+    },
+
+    notePage(assistant, note, options) {
+      const base = `/${escapeHtml(assistant.slug)}/documents`;
+      // A rejected save comes back with what was typed, not with what was
+      // stored: re-rendering the saved version would discard their edit.
+      const draft = options.draft;
+      const name = draft?.name ?? note?.name ?? '';
+      const tags = draft?.tags ?? note?.tags.join(', ') ?? '';
+      const content = draft?.content ?? note?.content ?? '';
+      const action = note ? `${base}/${note.id}` : base;
+
+      return layout({
+        title: `${note ? escapeHtml(note.name) : 'New document'} — ${assistant.name}`,
+        scripts: ['/editor.js'],
+        body: `    <main class="page page--editor" data-version="${ASSET_VERSION}">
+      <header class="page__head">
+        <div class="page__brand">
+          <p class="wordmark wordmark--small">${escapeHtml(assistant.name)}</p>
+          <h1>${note ? 'Edit document' : 'New document'}</h1>
+        </div>
+        <div class="row">
+          <a class="link" href="${base}">← Documents</a>
+          <a class="link" href="/${escapeHtml(assistant.slug)}">Chat</a>
+        </div>
+      </header>
+      ${notice(options)}
+
+      <form method="post" action="${action}" class="editor">
+        <div class="editor__meta">
+          <div class="field">
+            <label for="name">Name</label>
+            <input id="name" name="name" type="text" maxlength="${MAX_NOTE_NAME}"
+                   value="${escapeHtml(name)}" placeholder="Taken from the first line if you leave this empty">
+          </div>
+          <div class="field">
+            <label for="tags">Tags</label>
+            <input id="tags" name="tags" type="text" value="${escapeHtml(tags)}"
+                   placeholder="goals, planning">
+            <p class="muted small">Separated by commas, at most ${MAX_TAGS}. The date is added for you.</p>
+          </div>
+        </div>
+
+        <div class="editor__panes">
+          <div class="field editor__write">
+            <label for="content">Your text (Markdown)</label>
+            <textarea id="content" name="content" rows="20" required
+                      maxlength="${MAX_NOTE_CHARS}" spellcheck="true"
+                      placeholder="Write or paste your text here.">${escapeHtml(content)}</textarea>
+            <p class="muted small"><span id="editor-count"></span></p>
+          </div>
+          <div class="editor__preview">
+            <span class="field__label">Preview</span>
+            <div class="message__body message__body--rich" id="editor-preview"></div>
+          </div>
+        </div>
+
+        <div class="row editor__actions">
+          <button type="submit" name="finish" value="0">Save</button>
+          <button type="submit" name="finish" value="1" class="secondary">Save and finish</button>
+          <a class="link" href="${base}">Cancel</a>
         </div>
       </form>
     </main>`,

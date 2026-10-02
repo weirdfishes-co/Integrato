@@ -6,3 +6,5 @@ data
 *.db-wal
 .env
 .env.local
+# Marketing landing page: deployed on its own server, not part of this app.
+landing

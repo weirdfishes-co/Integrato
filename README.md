@@ -8,7 +8,7 @@ assistant in PostgreSQL.
 
 - **Stack**: Node 22, TypeScript, Express 5, PostgreSQL
 - **Model access**: OpenRouter (OpenAI-compatible API), one key for every model
-- **Email**: Brevo HTTP API
+- **Email**: Brevo or Mailjet HTTP API
 - **Hosting**: Railway (Dockerfile + a Postgres service + a volume for the knowledge bases)
 - **Auth**: magic link over email for users, `ADMIN_PASSWORD` for admins,
   30-day cookie session
@@ -43,14 +43,18 @@ admin, so the app is usable before any mail account exists.
 runs the real migrations against it, so a mistake in the SQL fails in the suite
 rather than in production.
 
-**Sending mail.** Set `BREVO_API_KEY` and `MAIL_FROM`. Brevo's HTTP API is the
-only transport: SMTP was removed after Railway proved unable to open a
-connection to Brevo's SMTP port on 587, 2525 or 465, while port 443 worked
-without trouble. Get a key from Brevo → SMTP & API → API Keys. Prefer the API key on a hosting platform: it runs
-over 443, while outbound SMTP ports are often blocked — by the host or by the
-mail provider — which surfaces as `Connection timeout` and no email.
+**Sending mail.** Set `MAIL_FROM` and the credentials of **one** provider:
+`BREVO_API_KEY` (Brevo → SMTP & API → API Keys), or `MAILJET_API_KEY` together
+with `MAILJET_SECRET_KEY`. Both are HTTP APIs; SMTP was removed after Railway
+proved unable to open a connection to Brevo's SMTP port on 587, 2525 or 465,
+while port 443 worked without trouble. Outbound SMTP ports are often blocked —
+by the host or by the mail provider — which surfaces as `Connection timeout` and
+no email. If both providers are configured the app refuses to start until
+`MAIL_PROVIDER=brevo` or `mailjet` says which one sends; it will not pick one
+silently. `MAIL_PROVIDER` naming a provider whose credentials are missing is
+refused too.
 
-**Signing in without a mail account.** Leave `BREVO_API_KEY` empty and the
+**Signing in without a mail account.** Leave both providers' keys empty and the
 sign-in link is written to the log instead of emailed:
 
 ```
@@ -58,7 +62,7 @@ SIGN-IN LINK (dev mode, not emailed)  link: http://localhost:3000/auth/callback?
 ```
 
 Paste that URL into your browser and you are in. This only works outside
-production: with `NODE_ENV=production` `BREVO_API_KEY` is required, so a sign-in
+production: with `NODE_ENV=production` a mail provider is required, so a sign-in
 link can never end up in a log file there.
 
 Other scripts:
@@ -72,19 +76,24 @@ npm test            # vitest
 
 ## Styling
 
-The interface follows [STYLE.md](STYLE.md), reverse-engineered from
-https://g.ieffe.dev. `public/styles.css` binds semantic names (`--bg`, `--text`,
-`--accent`, …) to that palette, so changing the look means changing the tokens
-and the type scale, not the components.
+The interface follows [STYLE.md](STYLE.md). Colour comes from the
+[Forest Green and Brown](https://colorschemes.net/palettes/forest-green-and-brown)
+palette; the type scale, the square corners and the breakpoints were
+reverse-engineered from https://g.ieffe.dev. `public/styles.css` names the five
+palette colours once and binds semantic names (`--bg`, `--text`, `--accent`, …)
+to them, so changing the look means changing the tokens and the type scale, not
+the components.
 
 Montserrat and Lato are self-hosted from `public/fonts/` — no CDN request, and
 the app works offline. There is no logo image anywhere, including in the
 sign-in email: the product name is set as text, so nothing depends on a mail
 client allowing images.
 
-Three things STYLE.md's source does not provide were decided here and are marked
-in the stylesheet: hover colours, a status palette for errors and confirmations,
-and a dark theme. Every colour pairing clears WCAG AA.
+**Every one of the five palette colours is dark** — there is no light tone in it
+at all, so the page ground, the surface tints, the hover states, the red and
+amber for status, and the dark theme were all decided here. Each is marked in
+the stylesheet where it appears. Every pairing clears WCAG AA; the lowest in use
+is the sidebar's white links at 5.18:1.
 
 Two conventions are worth knowing before you change anything:
 
@@ -92,9 +101,9 @@ Two conventions are worth knowing before you change anything:
   stand alone — a row of actions, a breadcrumb, a name in a table. A link
   *inside* a sentence keeps its underline, since weight and colour alone do not
   pick it out of a paragraph.
-- **The sidebar runs on a lighter step of the brand blue**, with bold white
-  links on it. Its rows have no hover fill: the conversation you are in is the
-  only one marked, and hovering a row reveals its delete button instead.
+- **The sidebar runs on the sage green**, the lightest of the five, with bold
+  white links on it. Its rows have no hover fill: the conversation you are in is
+  the only one marked, and hovering a row reveals its delete button instead.
 
 ## Assistants
 
@@ -103,12 +112,18 @@ An admin creates assistants on **`/admin`**. Each one gets:
 - its own **address**, `/<slug>`, derived from the name when it is created.
   Names that would collide with a built-in path (`admin`, `api`, `login`, …)
   get a numbered slug instead, so the assistant stays reachable. The old
-  `/a/<slug>` form redirects to the new one
+  `/a/<slug>` form redirects to the new one. An admin can **change the address**
+  later in the Address field of the identity form: the knowledge-base folder is
+  renamed to match, and the previous address keeps redirecting (301) to the new
+  one for anyone who may use the chatbot. The change is refused when another
+  chatbot has that address, when it is a reserved word, or when a folder of that
+  name already exists on the volume (a deleted chatbot leaves its files behind).
+  Open chat pages need a reload afterwards
 - its own **welcome message**, shown in an empty conversation (500 characters;
   empty falls back to a built-in sentence)
 - its own **instructions and knowledge base**, under
   `<ASSISTANTS_DIR>/<slug>/instr.md` and `<ASSISTANTS_DIR>/<slug>/context/*.md`
-- its own **model, effort, web search, memory, citations and compaction**
+- its own **model and settings** — see [Assistant settings](#assistant-settings)
 - its own **user list** — the rights matrix on the assistant's admin page
 
 **Access.** Admins may use every assistant. Everyone else sees only what they
@@ -215,6 +230,55 @@ Two limits worth knowing:
   answer whose connection dropped before the provider sent its usage. That is
   deliberately blank rather than zero — zero would claim the answer was free.
 
+## Letting users write their own documents
+
+Switch on **"Let users write their own documents"** on a chatbot's admin page and
+its users get a **My documents** link in the sidebar: a Markdown editor they can
+use instead of asking a question.
+
+A document is written or pasted, given a name and tags, and saved — **Save**
+stays in the editor, **Save and finish** returns to the list. The date is added
+for you, and so is the name if you leave it empty: it is taken from the first
+line, heading marks and all removed. Tags are lowercased and de-duplicated, so
+"Goals" and "goals" are one tag. The editor shows a live preview, rendered by
+the same code that renders the chatbot's answers, so what you see is what a
+reply would look like.
+
+From then on, everything in the list is sent along with every question that user
+asks that chatbot. The documents arrive as:
+
+```
+<document name="Q3 goals" tags="goals, planning" written="2026-10-02">
+...what you wrote...
+</document>
+```
+
+**They are per user and per chatbot.** Nobody else sees your documents, not even
+an admin, and a document written for one chatbot never reaches another. They are
+stored in the database rather than on the volume for exactly that reason — the
+knowledge base directories are shared by everyone who may use a chatbot, which
+is the wrong boundary for this.
+
+Worth knowing:
+
+- **A document is the user's material, not an instruction.** The prompt says so
+  explicitly, so a document that happens to read like an order ("ignore your
+  rules") is treated as something the user wrote rather than something the
+  chatbot must obey. It is a prompt instruction, so it is a strong default and
+  not a guarantee.
+- **Limits**: 20,000 characters per document, and 40,000 characters of documents
+  in one prompt. Past that the **oldest** are left out and the prompt says which
+  ones, so the chatbot can tell the user that a document was not loaded. The
+  alternative — letting the prompt grow until a request fails — would surface
+  months later as an error nobody could connect to its cause.
+- **Deleting a document removes it from the next question onwards.** It does not
+  edit conversations that already happened.
+- **There is no admin view of what users wrote.** That is deliberate for now;
+  the chatbot's own answers are the only place those documents surface.
+
+Users of a chatbot that does **not** have the setting get a 404 on those
+addresses, the same as for a chatbot that does not exist.
+
 ## Running on free models
 
 OpenRouter carries ~20 models priced at zero (`:free` suffix, plus a few
@@ -281,7 +345,7 @@ restart, no redeploy.
 | Setting | What it does |
 | --- | --- |
 | **Model** | Any model OpenRouter offers, with context size and price shown |
-| **Identity** | The chatbot's name, description, answer language and welcome message |
+| **Identity** | The chatbot's name, address (`/<slug>`), description, answer language and welcome message |
 | **Reasoning effort** | `low` … `max`. Models without reasoning support ignore it |
 | **Show thinking** | Streams the model's reasoning above the answer, collapsed |
 | **Web search** | Look things up beyond the knowledge base; billed per search |
@@ -289,9 +353,17 @@ restart, no redeploy.
 | **Temperature / Top-P** | How freely the model picks its words. Empty = the model's own default |
 | **EU-only routing** | Restrict every request to providers serving from an EU/EEA data centre |
 | **Anonymization** | Replace personal data with placeholders before a message leaves |
+| **Own documents** | Give users a Markdown editor; what they write is carried in the prompt |
 | **Memory** | Remember durable facts about a user across their conversations |
 | **Citations** | Ask the assistant to mark which document a statement came from |
 | **Compaction** | Summarize long threads instead of dropping the oldest messages |
+| **Admins can read conversations** | Adds a *Conversations* page under the chatbot in `/admin` listing every user's threads. Off by default |
+
+**Admins can read conversations.** Off by default, and the chat's setup strip
+tells users which way it is set ("Administrators can read these
+conversations"). Messages are shown exactly as stored: anonymization only changes
+what the model sees, never what is kept. It does not cover users' own
+documents, which stay private to their author.
 
 Three of these are built in this app rather than provided by OpenRouter, which
 is worth knowing when judging how reliable they are:
@@ -434,8 +506,11 @@ which the `Retry-After` header times.
    | `OPENROUTER_API_KEY` | yes | API key from [openrouter.ai/keys](https://openrouter.ai/keys) |
    | `ADMIN_EMAILS` | yes | Comma-separated admins; always granted rights at boot |
    | `ADMIN_PASSWORD` | yes | Shared password for those addresses. Admins sign in with it instead of a magic link; at least 12 characters in production |
-   | `BREVO_API_KEY` | yes | Brevo HTTP API key; the only way the app sends mail |
-   | `MAIL_FROM` | no | Sender, e.g. `Unlimited Brain <noreply@yourdomain.com>`. Must be a sender Brevo has verified |
+   | `EMAIL_ENCRYPTION_KEY` | yes | Encrypts user email addresses in the database; at least 32 characters (`openssl rand -base64 32`). **Back it up**: if it is lost or changed, the stored addresses cannot be read again |
+   | `BREVO_API_KEY` | one provider | Brevo HTTP API key. Production needs Brevo or Mailjet |
+   | `MAILJET_API_KEY` / `MAILJET_SECRET_KEY` | one provider | Mailjet's key pair; setting only one of the two is refused |
+   | `MAIL_PROVIDER` | only if both | `brevo` or `mailjet`. Required when both providers are configured; the app will not guess |
+   | `MAIL_FROM` | no | Sender, e.g. `Unlimited Brain <noreply@yourdomain.com>`. Must be a sender the provider has verified |
    | `ASSISTANT_NAME` | no | Name of the *first* assistant on a fresh install, and the sign-in email's sender name |
    | `ASSISTANT_LANGUAGE` | no | Answer language of the first assistant; each assistant carries its own afterwards |
    | `APP_URL` | yes | Public URL, e.g. `https://assistant.up.railway.app`. Magic links are built on this; `https://` sets the Secure flag on the cookie |
@@ -445,6 +520,8 @@ which the `Retry-After` header times.
    | `OPENROUTER_SITE_URL` / `OPENROUTER_SITE_NAME` | no | Optional attribution on the openrouter.ai rankings |
    | `SESSION_DAYS` / `LOGIN_TOKEN_MINUTES` | no | Default 30 days and 30 minutes. `LOGIN_TOKEN_MINUTES` only affects the magic links non-admins receive |
    | `LOG_LEVEL` | no | pino level, default `info` |
+   | `NODE_ENV` | no | `production` turns on the stricter checks (mail provider required, 12-character admin password). The image sets it |
+   | `PORT` | no | Default 3000. Railway sets it itself |
 
    Railway sets `PORT` itself; the server binds on `0.0.0.0`. Do not set
    `ASSISTANTS_DIR` to a relative path — the image already points it at the
@@ -465,6 +542,7 @@ docker run --rm -p 3000:3000 \
   -e OPENROUTER_API_KEY=sk-or-v1-... \
   -e ADMIN_EMAILS=you@example.com \
   -e ADMIN_PASSWORD=a-long-password \
+  -e EMAIL_ENCRYPTION_KEY=$(openssl rand -base64 32) \
   -e BREVO_API_KEY=xkeysib-... \
   -e APP_URL=http://localhost:3000 \
   -v "$PWD/data:/data" \
@@ -474,6 +552,11 @@ docker run --rm -p 3000:3000 \
 ## Security
 
 - Sign-in tokens and session tokens are stored as a SHA-256 hash only.
+- User email addresses are encrypted in the database (AES-256-GCM, key from
+  `EMAIL_ENCRYPTION_KEY`) and looked up through an HMAC of the address. Addresses
+  from before this existed are converted on the first boot. The key is not
+  recoverable: back it up. The server log still contains addresses on failed
+  sign-ins and mail errors.
 - A sign-in link works once and expires after `LOGIN_TOKEN_MINUTES`.
 - `ADMIN_PASSWORD` is compared in constant time and is never written to the log.
   It is shared by every address in `ADMIN_EMAILS`, so the audit trail says

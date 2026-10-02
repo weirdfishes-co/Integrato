@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Balance } from '../src/balance.js';
-import type { Assistant, User } from '../src/db/repo.js';
+import type { Assistant, ConversationWithUser, Message, Note, User, UserUsage } from '../src/db/repo.js';
 import type { ModelOption } from '../src/models.js';
 import type { AssistantSettings } from '../src/settings.js';
 import { createViews } from '../src/views.js';
@@ -97,6 +97,8 @@ describe('the chatbot settings form', () => {
     memory: false,
     citations: false,
     compaction: false,
+    notes: false,
+    adminConversationLog: false,
     euOnly: false,
     anonymize: false,
     temperature: null,
@@ -154,6 +156,48 @@ describe('the chatbot settings form', () => {
   it('says on the page that names are not caught', () => {
     expect(render({ anonymize: true })).toContain('does not catch names');
   });
+
+  it('ticks the admin conversation log toggle from the settings', () => {
+    expect(render({ adminConversationLog: true })).toContain(
+      'name="admin_conversation_log" value="1" checked',
+    );
+    expect(render()).not.toContain('name="admin_conversation_log" value="1" checked');
+  });
+
+  it('only links to the conversation log once it is turned on', () => {
+    expect(render({ adminConversationLog: true })).toContain(
+      `href="/admin/assistants/${assistant.id}/conversations"`,
+    );
+    expect(render()).not.toContain('/conversations"');
+  });
+
+  it('shows token and cost totals per user', () => {
+    const usage: UserUsage[] = [
+      { userId: 2, email: 'user@example.com', answerCount: 3, promptTokens: 1000, completionTokens: 500, cost: 0.12 },
+    ];
+    const html = views.assistantPage(assistant, { settings, models: [model()], usage });
+
+    expect(html).toContain('user@example.com');
+    expect(html).toContain('1,500');
+    expect(html).toContain('$0.12');
+    expect(html).toContain('Total: $0.12');
+  });
+
+  it('says so when nobody has used the chatbot yet', () => {
+    const html = views.assistantPage(assistant, { settings, models: [model()], usage: [] });
+
+    expect(html).toContain('No answers yet.');
+  });
+
+  it('shows "not recorded" rather than $0.00 when cost was never reported', () => {
+    const usage: UserUsage[] = [
+      { userId: 2, email: 'user@example.com', answerCount: 1, promptTokens: 10, completionTokens: 5, cost: null },
+    ];
+    const html = views.assistantPage(assistant, { settings, models: [model()], usage });
+
+    expect(html).toContain('not recorded');
+    expect(html).not.toContain('Total:');
+  });
 });
 
 describe('the setup strip under the chat', () => {
@@ -186,6 +230,8 @@ describe('the setup strip under the chat', () => {
     memory: false,
     citations: false,
     compaction: false,
+    notes: false,
+    adminConversationLog: false,
     euOnly: false,
     anonymize: false,
     temperature: null,
@@ -206,6 +252,48 @@ describe('the setup strip under the chat', () => {
 
   it('names the model while it is still shut', () => {
     expect(render()).toContain('<span class="setup__model">google/gemini-3.5-flash-lite</span>');
+  });
+
+  /* A long name must not push the sidebar's own links out of reach. */
+  it('cuts the chatbot name at 40 characters but keeps it whole in the tooltip', () => {
+    const long = { ...assistant, name: 'The Exceptionally Long Nyenrode Executive Coaching Chatbot' };
+    const html = views.chatPage(user, long, false, off);
+
+    expect(html).toContain('title="The Exceptionally Long Nyenrode Executive Coaching Chatbot"');
+    expect(html).toMatch(/class="brand__assistant"[^>]*>The Exceptionally Long Nyenrode Executi\u2026</);
+  });
+
+  it('leaves a name that already fits alone', () => {
+    expect(views.chatPage(user, assistant, false, off)).toContain('>Coach</span>');
+  });
+
+  /*
+   * On the chat screen as well as the picker: a user granted exactly one
+   * chatbot never sees the picker, and sessions last 30 days.
+   */
+  it('offers sign-out on the chat screen too', () => {
+    expect(views.chatPage(user, assistant, false, off)).toContain('/logout');
+    expect(views.pickerPage(user, [assistant])).toContain('/logout');
+  });
+
+  it('calls the editor Documents, not My documents', () => {
+    const html = views.chatPage(user, assistant, false, { ...off, notes: true });
+
+    expect(html).toContain('>Documents</a>');
+    expect(html).not.toContain('My documents');
+  });
+
+  /*
+   * The row with the most at stake for whoever is reading it: it is stated as
+   * what happens, not as the name of the setting that causes it.
+   */
+  it('discloses whether an administrator can read these conversations', () => {
+    const on = views.chatPage(user, assistant, false, { ...off, adminConversationLog: true });
+    const shut = views.chatPage(user, assistant, false, off);
+
+    expect(on).toContain('Administrators can read these conversations');
+    expect(on).toContain('not only your own');
+    expect(shut).toContain('nobody else can open your conversations');
   });
 
   it('states the routing either way', () => {
@@ -241,5 +329,182 @@ describe('the setup strip under the chat', () => {
   it('is there for an ordinary user, not only an admin', () => {
     expect(user.isAdmin).toBe(false);
     expect(render()).toContain('How this chatbot is set up');
+  });
+});
+
+describe('the document pages', () => {
+  const user: User = {
+    id: 2,
+    email: 'user@example.com',
+    isAdmin: false,
+    createdAt: '',
+    lastSeenAt: null,
+  };
+
+  const assistant: Assistant = {
+    id: 7,
+    slug: 'coach',
+    name: 'Coach',
+    description: '',
+    language: 'English',
+    welcome: '',
+    createdAt: '',
+  };
+
+  const settings: AssistantSettings = {
+    model: 'a/b',
+    effort: 'high',
+    showThinking: false,
+    webSearch: false,
+    webSearchMaxResults: 5,
+    webSearchIncludeDomains: [],
+    webSearchExcludeDomains: [],
+    memory: false,
+    citations: false,
+    compaction: false,
+    notes: false,
+    adminConversationLog: false,
+    euOnly: false,
+    anonymize: false,
+    temperature: null,
+    topP: null,
+  };
+
+  const note: Note = {
+    id: 3,
+    userId: 2,
+    assistantId: 7,
+    name: 'Q3 goals',
+    tags: ['goals'],
+    content: '# Q3\n\nGrow the team.',
+    createdAt: '2026-10-01 09:00:00',
+    updatedAt: '2026-10-02 11:00:00',
+  };
+
+  /* The chat only offers the editor when the chatbot was given it. */
+  it('links to the documents from the chat only when the setting is on', () => {
+    const on = views.chatPage(user, assistant, false, { ...settings, notes: true });
+    const off = views.chatPage(user, assistant, false, settings);
+
+    expect(on).toContain('href="/coach/documents"');
+    expect(off).not.toContain('/coach/documents');
+  });
+
+  it('lists a document with its tags and the date it changed', () => {
+    const html = views.notesPage(assistant, [note], {});
+
+    expect(html).toContain('Q3 goals');
+    expect(html).toContain('<span class="tag">goals</span>');
+    expect(html).toContain('2026-10-02');
+    expect(html).toContain('href="/coach/documents/3"');
+  });
+
+  it('says plainly who can see them', () => {
+    expect(views.notesPage(assistant, [], {})).toContain('Only you can see these');
+  });
+
+  it('offers both save buttons, which the route tells apart by value', () => {
+    const html = views.notePage(assistant, note, {});
+
+    expect(html).toContain('name="finish" value="0"');
+    expect(html).toContain('name="finish" value="1"');
+  });
+
+  it('posts a new document to the collection and an edit to its own address', () => {
+    expect(views.notePage(assistant, null, {})).toContain('action="/coach/documents"');
+    expect(views.notePage(assistant, note, {})).toContain('action="/coach/documents/3"');
+  });
+
+  it('fills the editor from the stored document', () => {
+    const html = views.notePage(assistant, note, {});
+
+    expect(html).toContain('value="Q3 goals"');
+    expect(html).toContain('value="goals"');
+    expect(html).toContain('Grow the team.');
+  });
+
+  /*
+   * A rejected save must come back with what was typed. Re-rendering the stored
+   * version would throw away the edit that was being saved.
+   */
+  it('keeps the draft, not the stored text, when a save was refused', () => {
+    const html = views.notePage(assistant, note, {
+      error: 'The document is empty.',
+      draft: { name: 'Renamed', tags: 'fresh', content: 'Edited text.' },
+    });
+
+    expect(html).toContain('value="Renamed"');
+    expect(html).toContain('Edited text.');
+    expect(html).not.toContain('Grow the team.');
+    expect(html).toContain('The document is empty.');
+  });
+
+  it('escapes a document name rather than rendering it', () => {
+    const hostile = { ...note, name: '<script>alert(1)</script>' };
+
+    expect(views.notesPage(assistant, [hostile], {})).not.toContain('<script>alert');
+  });
+});
+
+describe('the admin conversation log pages', () => {
+  const assistant: Assistant = {
+    id: 7,
+    slug: 'coach',
+    name: 'Coach',
+    description: '',
+    language: 'English',
+    welcome: '',
+    createdAt: '',
+  };
+
+  const conversation: ConversationWithUser = {
+    id: 42,
+    userId: 2,
+    assistantId: 7,
+    title: 'Planning Q4',
+    createdAt: '2026-10-01 09:00:00',
+    updatedAt: '2026-10-02 11:00:00',
+    summary: null,
+    summarizedThrough: null,
+    userEmail: 'user@example.com',
+  };
+
+  const messages: Message[] = [
+    { id: 1, conversationId: 42, role: 'user', content: 'What is our Q4 plan?', createdAt: '2026-10-02 10:59:00', usage: null },
+    { id: 2, conversationId: 42, role: 'assistant', content: 'Here is the plan.', createdAt: '2026-10-02 11:00:00', usage: null },
+  ];
+
+  it('lists every conversation with who it belongs to', () => {
+    const html = views.conversationsPage([conversation], { assistant });
+
+    expect(html).toContain('Planning Q4');
+    expect(html).toContain('user@example.com');
+    expect(html).toContain(`href="/admin/assistants/7/conversations/42"`);
+  });
+
+  it('says plainly that stored text is never anonymized', () => {
+    expect(views.conversationsPage([], { assistant })).toContain('never anonymized');
+  });
+
+  it('shows every message with its role', () => {
+    const html = views.conversationPage(messages, {
+      assistant,
+      conversation,
+      base: '/admin/assistants/7/conversations',
+    });
+
+    expect(html).toContain('What is our Q4 plan?');
+    expect(html).toContain('Here is the plan.');
+    expect(html).toContain('message--user');
+    expect(html).toContain('message--assistant');
+    expect(html).toContain('user@example.com');
+  });
+
+  it('escapes message content rather than rendering it', () => {
+    const hostile = [{ ...messages[0]!, content: '<script>alert(1)</script>' }];
+
+    expect(
+      views.conversationPage(hostile, { assistant, conversation, base: '/admin/assistants/7/conversations' }),
+    ).not.toContain('<script>alert');
   });
 });

@@ -10,6 +10,11 @@ const config = loadConfig();
 const db = await openDatabase(config.databaseUrl);
 const { express: app, repo, bundledContent } = createApp(config, db);
 
+// Addresses stored before they were encrypted are converted once, before
+// anything reads them.
+const protectedEmails = await repo.protectEmails();
+if (protectedEmails > 0) logger.info({ rows: protectedEmails }, 'encrypted stored email addresses');
+
 // Admins from the environment always exist: that way you can sign in right
 // after an empty database and manage the rest of the user list.
 for (const email of config.adminEmails) {
