@@ -1,4 +1,4 @@
-# Unlimited Brain — Styleguide
+# Integrato — Styleguide
 
 **Colour comes from the "Forest Green and Brown" palette**
 (https://colorschemes.net/palettes/forest-green-and-brown), adopted October 2026.

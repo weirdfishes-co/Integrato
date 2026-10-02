@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!--
+    An I, drawn rather than set in type: a favicon cannot carry a webfont, and
+    Montserrat's capital I is a bare vertical bar that reads as a rendering
+    glitch at 16px. The crossbars make it unmistakably a letter.
+
+    The background stays transparent, so the glyph has to work on the browser's
+    own tab colour — which is light in one theme and dark in the other. Hence
+    the media query: the forest green is 8.6:1 on a light tab strip but would
+    almost vanish on a dark one, where the lighter sage gives 4.7:1. A browser
+    that ignores the query gets the forest green everywhere, which is the
+    readable half of the pair on the commoner background.
+  -->
+  <style>
+    .glyph { fill: #2e4b36; }
+    @media (prefers-color-scheme: dark) {
+      .glyph { fill: #8a9e86; }
+    }
+  </style>
+  <g class="glyph">
+    <rect x="8" y="4" width="16" height="5"/>
+    <rect x="13" y="4" width="6" height="24"/>
+    <rect x="8" y="23" width="16" height="5"/>
+  </g>
+</svg>

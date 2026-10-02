@@ -45,3 +45,33 @@ describe('public/styles.css', () => {
     expect(css).toMatch(/\*\s*\{[^}]*box-sizing:\s*border-box/);
   });
 });
+
+/*
+ * The favicon is a drawn glyph rather than a font or a bitmap, so it is worth
+ * a couple of assertions: a letter made of rects is easy to break silently,
+ * and the transparent background is the whole reason the dark-mode rule exists.
+ */
+describe('public/favicon.svg', () => {
+  const svg = readFileSync(new URL('../public/favicon.svg', import.meta.url), 'utf8');
+
+  it('draws the I in the brand green', () => {
+    expect(svg).toContain('#2e4b36');
+    // The colour comes from the class, so the theme rule below can override it.
+    expect(svg).not.toMatch(/<rect[^>]*fill=/);
+  });
+
+  /* No full-bleed rect: the tab strip shows through, which is the point. */
+  it('paints no background', () => {
+    expect(svg).not.toMatch(/<rect[^>]*width="32"[^>]*height="32"/);
+    expect(svg).not.toMatch(/<rect[^>]*height="32"[^>]*width="32"/);
+  });
+
+  /* A dark tab strip would all but swallow the forest green. */
+  it('lightens the glyph for a dark tab strip', () => {
+    expect(svg).toMatch(/@media \(prefers-color-scheme: dark\)[^}]*#8a9e86/s);
+  });
+
+  it('is three bars, which is what makes it read as a letter', () => {
+    expect(svg.match(/<rect/g)).toHaveLength(3);
+  });
+});

@@ -27,6 +27,13 @@ export function createCipher(secret: string): Cipher {
   if (secret.length < MIN_ENCRYPTION_SECRET) {
     throw new Error(`The encryption secret must be at least ${MIN_ENCRYPTION_SECRET} characters`);
   }
+  /*
+   * The salt is a key-derivation input, not a name. It stays "unlimited-brain"
+   * whatever the product is called: change it and every stored address becomes
+   * undecryptable *and* every blind index changes, so no account could be
+   * found by email again — nobody signs in. A product rename must not touch
+   * this string, and neither must a tidy-up.
+   */
   const derive = (info: string): Buffer =>
     Buffer.from(hkdfSync('sha256', secret, 'unlimited-brain', info, 32));
   const encryptionKey = derive('email-encryption');

@@ -1,9 +1,9 @@
 {
-  "name": "unlimited-brain",
+  "name": "integrato",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Unlimited Brain: several configurable assistants on OpenRouter, with magic-link sign-in and PostgreSQL conversation history",
+  "description": "Integrato: several configurable assistants on OpenRouter, with magic-link sign-in and PostgreSQL conversation history",
   "engines": {
     "node": "22.x"
   },

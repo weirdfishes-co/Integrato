@@ -179,9 +179,9 @@ describe('loadConfig', () => {
   it('defaults the assistant name and language, and uses the name in MAIL_FROM', async () => {
     const config = loadConfig({ ...base } as NodeJS.ProcessEnv);
 
-    expect(config.assistantName).toBe('Unlimited Brain');
+    expect(config.assistantName).toBe('Integrato');
     expect(config.assistantLanguage).toBe('English');
-    expect(config.mail.from).toBe('Unlimited Brain <noreply@localhost>');
+    expect(config.mail.from).toBe('Integrato <noreply@localhost>');
   });
 
   it('accepts a custom assistant name and language', async () => {

@@ -6,7 +6,7 @@ instructions (installing, deploying, env variables) live in [README.md](README.m
 
 ## What this is
 
-**Unlimited Brain** — a host for **several chat assistants**. Each assistant has its own system
+**Integrato** — a host for **several chat assistants**. Each assistant has its own system
 prompt, its own markdown knowledge base, its own model and settings, and its own
 list of users. The model runs through OpenRouter. Only email addresses on the
 user list can sign in — ordinary users via a magic link, admins with their email

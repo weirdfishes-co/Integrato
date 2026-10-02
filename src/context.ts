@@ -25,7 +25,7 @@ interface CacheEntry {
   prompt: string;
 }
 
-const DEFAULT_NAME = 'Unlimited Brain';
+const DEFAULT_NAME = 'Integrato';
 const DEFAULT_LANGUAGE = 'English';
 
 /**

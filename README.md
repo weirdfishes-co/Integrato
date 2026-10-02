@@ -1,4 +1,4 @@
-# Unlimited Brain
+# Integrato
 
 A host for several configurable chat assistants, on any model OpenRouter offers.
 Each assistant has its own instructions, knowledge base, model settings and list
@@ -510,7 +510,7 @@ which the `Retry-After` header times.
    | `BREVO_API_KEY` | one provider | Brevo HTTP API key. Production needs Brevo or Mailjet |
    | `MAILJET_API_KEY` / `MAILJET_SECRET_KEY` | one provider | Mailjet's key pair; setting only one of the two is refused |
    | `MAIL_PROVIDER` | only if both | `brevo` or `mailjet`. Required when both providers are configured; the app will not guess |
-   | `MAIL_FROM` | no | Sender, e.g. `Unlimited Brain <noreply@yourdomain.com>`. Must be a sender the provider has verified |
+   | `MAIL_FROM` | no | Sender, e.g. `Integrato <noreply@yourdomain.com>`. Must be a sender the provider has verified |
    | `ASSISTANT_NAME` | no | Name of the *first* assistant on a fresh install, and the sign-in email's sender name |
    | `ASSISTANT_LANGUAGE` | no | Answer language of the first assistant; each assistant carries its own afterwards |
    | `APP_URL` | yes | Public URL, e.g. `https://assistant.up.railway.app`. Magic links are built on this; `https://` sets the Secure flag on the cookie |

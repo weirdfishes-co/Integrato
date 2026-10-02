@@ -200,6 +200,14 @@ describe('the chatbot settings form', () => {
   });
 });
 
+describe('the page shell', () => {
+  it('links the favicon with the asset version, like every other asset', () => {
+    expect(views.loginPage()).toMatch(
+      /<link rel="icon" type="image\/svg\+xml" href="\/favicon\.svg\?v=[a-z0-9]+">/,
+    );
+  });
+});
+
 describe('the setup strip under the chat', () => {
   const user: User = {
     id: 2,
