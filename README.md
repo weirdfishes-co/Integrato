@@ -82,6 +82,7 @@ than the first request. [`.env.example`](.env.example) is the template.
 | `MODEL_EFFORT` / `MODEL_MAX_TOKENS` | no | `high`, `8000` |
 | `OPENROUTER_SITE_URL` / `OPENROUTER_SITE_NAME` | no | Attribution on the OpenRouter rankings |
 | `SESSION_DAYS` / `LOGIN_TOKEN_MINUTES` | no | 30 days, 30 minutes |
+| `TRUST_PROXY` | behind a proxy | Number of proxies in front, or `true`. **Off by default**: with nothing in front, trusting `X-Forwarded-For` lets a caller pick their own `req.ip`. Unset behind a proxy means the per-IP login limit counts every visitor as one client — the log warns when it sees the header |
 | `PORT` / `NODE_ENV` / `LOG_LEVEL` | no | `3000`, `development`, `info` |
 
 Both mail providers are HTTP APIs on port 443. There is no SMTP transport:
@@ -340,6 +341,26 @@ and web search still bills whatever the model costs.
 - The knowledge-base page validates file names **and** checks the resolved path
   against the base directory, so `../` cannot write outside it.
 - The server runs as the unprivileged `node` user.
+- **A state-changing request must come from this origin.** `Origin` (or
+  `Referer`) is checked against the site's own host on every POST and DELETE.
+  The session cookie is `sameSite=lax`, which already blocks a cross-*site*
+  POST; this closes what SameSite leaves open, since it treats every subdomain
+  of one domain as the same site — so a sibling host cannot post with an
+  admin's cookie.
+- **A strict Content-Security-Policy**: `'self'` for everything, no
+  `unsafe-inline`, `frame-ancestors 'none'`, `object-src 'none'`. The app
+  fetches nothing from anywhere — self-hosted fonts, no CDN, no inline script or
+  `style=` attribute — so the policy needs no escape hatch. It is the second
+  line behind the Markdown renderer's escaping. Sent with `nosniff`,
+  `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`.
+- **Confirmation prompts carry no code.** A delete confirmation is a
+  `data-confirm` attribute read as text, never an `onsubmit` handler — an HTML
+  attribute holding JavaScript needs JavaScript escaping, and HTML escaping
+  there is a hole rather than a defence.
+- **Messages are rate-limited per user** (30 per five minutes), because every
+  message spends OpenRouter credit, and users may keep at most 200 documents per
+  chatbot. The login form allows 5 attempts per 15 minutes per address and per
+  IP. These limits live in memory, so they are per process and reset on restart.
 - `.env`, the database and `data/` are gitignored and never enter the image.
 
 ## Development

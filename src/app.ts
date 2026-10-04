@@ -19,6 +19,7 @@ import { createChatRouter } from './routes/chat.js';
 import { createNoteRouter } from './routes/notes.js';
 import { createContentRouter } from './routes/content.js';
 import { createConversationsRouter } from './routes/conversations.js';
+import { createOriginGuard, securityHeaders, warnAboutProxy } from './security.js';
 import { createViews } from './views.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -57,7 +58,13 @@ export function createApp(config: Config, db: Db): App {
 
   const app = express();
   app.disable('x-powered-by');
-  app.set('trust proxy', 1); // Railway sits behind a proxy: needed for req.ip and secure cookies.
+  // Off unless TRUST_PROXY says otherwise: believing X-Forwarded-For with no
+  // proxy in front would let anyone pick their own req.ip.
+  app.set('trust proxy', config.trustProxy);
+
+  app.use(securityHeaders());
+  app.use(warnAboutProxy(config));
+  app.use(createOriginGuard({ config, views }));
 
   app.use(express.urlencoded({ extended: false, limit: '64kb' }));
   app.use(express.json({ limit: '256kb' }));

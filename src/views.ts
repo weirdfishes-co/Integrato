@@ -40,7 +40,9 @@ interface LayoutOptions {
 const ASSET_VERSION = Date.now().toString(36);
 
 function layout({ title, body, bodyClass, scripts = [] }: LayoutOptions): string {
-  const scriptTags = scripts
+  // Every page: it replaces inline onsubmit handlers, which cannot be escaped
+  // correctly. See public/confirm.js.
+  const scriptTags = [...scripts, '/confirm.js']
     .map((src) => `<script type="module" src="${src}?v=${ASSET_VERSION}" defer></script>`)
     .join('\n    ');
   return `<!doctype html>
@@ -502,9 +504,9 @@ ${cards}
             <td class="actions">${
               user.id === currentUser.id
                 ? '<span class="muted small">you</span>'
-                : `<form method="post" action="/admin/users/${user.id}/delete" onsubmit="return confirm('Delete ${escapeHtml(
+                : `<form method="post" action="/admin/users/${user.id}/delete" data-confirm="Delete ${escapeHtml(
                     user.email,
-                  )}? Their conversation history will be removed as well.')"><button type="submit" class="link small danger">Delete</button></form>`
+                  )}? Their conversation history will be removed as well."><button type="submit" class="link small danger">Delete</button></form>`
             }</td>
           </tr>`,
         )
@@ -522,9 +524,9 @@ ${cards}
             <td class="actions">
               <a class="link small" href="/${escapeHtml(assistant.slug)}">Open</a>
               <form method="post" action="/admin/assistants/${assistant.id}/delete"
-                    onsubmit="return confirm('Delete ${escapeHtml(
+                    data-confirm="Delete ${escapeHtml(
                       assistant.name,
-                    )}? Its conversations, memories and settings are removed. The knowledge-base files stay on disk.')"><button type="submit" class="link small danger">Delete</button></form>
+                    )}? Its conversations, memories and settings are removed. The knowledge-base files stay on disk."><button type="submit" class="link small danger">Delete</button></form>
             </td>
           </tr>`,
               )
@@ -871,7 +873,7 @@ ${userRows}
         <h2>Delete</h2>
         <p class="muted small">Removes this chatbot with every conversation, memory and setting belonging to it. Its knowledge-base files stay on disk.</p>
         <form method="post" action="/admin/assistants/${assistant.id}/delete"
-              onsubmit="return confirm('Delete ${escapeHtml(assistant.name)} and all its conversations?')">
+              data-confirm="Delete ${escapeHtml(assistant.name)} and all its conversations?">
           <button type="submit" class="danger">Delete this chatbot</button>
         </form>
       </section>
@@ -893,9 +895,9 @@ ${userRows}
             )}</a></td>
             <td><code>{Global.${escapeHtml(doc.placeholder)}}</code></td>
             <td class="muted small">${formatBytes(doc.sizeBytes)} · ${escapeHtml(doc.modifiedAt)}</td>
-            <td class="actions"><form method="post" action="${base}/delete" onsubmit="return confirm('Permanently delete ${escapeHtml(
+            <td class="actions"><form method="post" action="${base}/delete" data-confirm="Permanently delete ${escapeHtml(
               doc.name,
-            )}?')"><input type="hidden" name="name" value="${escapeHtml(
+            )}?"><input type="hidden" name="name" value="${escapeHtml(
               doc.name,
             )}"><button type="submit" class="link small danger">Delete</button></form></td>
           </tr>`,
@@ -1087,7 +1089,7 @@ ${turns}
             <td class="row">
               <a class="link small" href="${base}/${note.id}">Edit</a>
               <form method="post" action="${base}/${note.id}/delete"
-                    onsubmit="return confirm('Delete &quot;${escapeHtml(note.name)}&quot;?')">
+                    data-confirm="Delete &quot;${escapeHtml(note.name)}&quot;?">
                 <button type="submit" class="link small danger">Delete</button>
               </form>
             </td>

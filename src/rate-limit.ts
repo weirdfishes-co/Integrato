@@ -1,7 +1,10 @@
 /**
- * Simple in-memory rate limiter for the login form.
- * One instance per process is enough: the app runs as a single Railway service
- * with a local SQLite file, so there is no shared state between replicas.
+ * Simple in-memory rate limiter, used for the login form and for chat messages.
+ *
+ * Per process, so it resets on restart and does not add up across replicas. For
+ * the login form that is acceptable — the window is short and the point is to
+ * make guessing slow. For messages it is a cost ceiling, not a guarantee. A
+ * shared limit would have to live in Postgres.
  */
 export interface RateLimiter {
   /** Returns false when the key is over its limit. */

@@ -298,6 +298,39 @@ context/*.md         knowledge base seeded into a brand-new assistant
   database *and* the key, and addresses are still written to the log by `routes/auth.ts` (failed
   admin attempts, unknown addresses, mail failures) and, in development, by
   the mailer — encrypting the table does not cover the logs.
+- **The confirmation on a delete is `data-confirm`, never `onsubmit`.** An
+  inline handler is a *JavaScript* context inside an HTML attribute, and
+  `escapeHtml` is the wrong escaping for it: the parser turns `&#39;` back into
+  a real quote before the handler compiles, so a name with an apostrophe broke
+  out of the string and executed. That was proven, not theorised — a document
+  name was enough, and a chatbot name reached other admins the same way.
+  `public/confirm.js` reads the text through `dataset`, where HTML escaping is
+  exactly right. `tests/views.test.ts` fails if any page renders an inline
+  handler again, which is also what keeps the CSP free of `unsafe-inline`.
+- **Three HTTP defences live in `security.ts`, not in a route.** A strict CSP
+  (`'self'` throughout, no `unsafe-inline`, `frame-ancestors 'none'`) is
+  possible only because the app fetches nothing external — self-hosted fonts, no
+  CDN, no inline script or `style=`. An **origin guard** refuses a POST or
+  DELETE whose `Origin` matches neither `APP_URL` nor the request's own `Host`;
+  it exists because `sameSite=lax` treats every subdomain of one registrable
+  domain as the same site, so a sibling host could otherwise post with an
+  admin's cookie. It accepts the request's own Host as well, because `APP_URL`
+  is routinely wrong in development and rejecting every form then would protect
+  nothing. A request with neither `Origin` nor `Referer` is allowed: browsers
+  always send one on a POST, so that is a non-browser client with no ambient
+  cookie.
+- **`trust proxy` is configuration, and defaults to off.** Believing
+  `X-Forwarded-For` with nothing in front lets any caller choose their own
+  `req.ip` and walk past the per-IP login limit. The opposite mistake — off
+  while a proxy *is* in front — makes that limit count every visitor as one
+  client, so `warnAboutProxy` logs once when it sees the header without
+  `TRUST_PROXY`. Loud beats silent in both directions.
+- **Messages are rate-limited per user, because they cost money.** 30 per five
+  minutes, keyed on the user and not the IP: the spend follows the account, and
+  a household behind one address should not share a budget. Documents are capped
+  at `MAX_NOTES_PER_USER` per chatbot — the prompt budget already bounds what is
+  *sent*, but nothing bounded what is *stored*. Both limiters are in memory, so
+  they are per process and reset on restart; shared limits would need Postgres.
 - **Memory goes after the knowledge base in the system prompt**, never before.
   The knowledge base is the cached prefix shared by every user; putting a
   per-user block in front of it would invalidate the cache for everyone on every

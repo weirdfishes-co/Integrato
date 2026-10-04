@@ -200,6 +200,53 @@ describe('the chatbot settings form', () => {
   });
 });
 
+describe('inline event handlers', () => {
+  /*
+   * `onsubmit="return confirm('...')"` is a JavaScript context inside an HTML
+   * attribute, and HTML escaping is the wrong escaping for it: the parser turns
+   * `&#39;` back into a real quote before the handler is compiled, so a name
+   * with an apostrophe broke out of the string literal and executed. A document
+   * name was enough, and a chatbot name reached other admins the same way.
+   *
+   * The confirmation now travels as `data-confirm` text, read through dataset
+   * and never compiled. These two tests keep it that way — and keep a strict
+   * Content-Security-Policy possible, which inline handlers would rule out.
+   */
+  const hostile = "' + (window.pwned = 'yes') + '";
+
+  function pages(): string[] {
+    const assistant: Assistant = {
+      id: 1, slug: 'coach', name: hostile, description: '', language: 'English',
+      welcome: '', createdAt: '',
+    };
+    const note: Note = {
+      id: 3, userId: 2, assistantId: 1, name: hostile, tags: [], content: 'body',
+      createdAt: '2026-10-04 10:00:00', updatedAt: '2026-10-04 10:00:00',
+    };
+    const hostileUser: User = {
+      id: 9, email: `${hostile}@example.com`, isAdmin: false, createdAt: '', lastSeenAt: null,
+    };
+    return [
+      views.adminPage([hostileUser], admin, { assistants: [assistant] }),
+      views.notesPage(assistant, [note], {}),
+      views.pickerPage(admin, [assistant]),
+    ];
+  }
+
+  it('renders none at all, on any page', () => {
+    for (const html of pages()) {
+      expect(html).not.toMatch(/\son[a-z]+\s*=\s*["']/i);
+    }
+  });
+
+  it('carries a hostile name as attribute text, not as code', () => {
+    for (const html of pages()) {
+      expect(html).not.toContain("window.pwned = 'yes'");
+      expect(html).not.toMatch(/javascript:/i);
+    }
+  });
+});
+
 describe('the page shell', () => {
   it('links the favicon with the asset version, like every other asset', () => {
     expect(views.loginPage()).toMatch(

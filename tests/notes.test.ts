@@ -112,6 +112,27 @@ describe('storing a user document', () => {
     ]);
   });
 
+  /* What the per-user cap is checked against. */
+  it('counts documents per user and per chatbot', async () => {
+    const other = await repo.upsertUser('b@example.com', false);
+    const second = await repo.createAssistant('hr', 'HR', '', 'English');
+    await repo.createNote(userId, assistantId, 'One', [], 'a');
+    await repo.createNote(userId, assistantId, 'Two', [], 'b');
+    await repo.createNote(other.id, assistantId, 'Theirs', [], 'c');
+    await repo.createNote(userId, second.id, 'Elsewhere', [], 'd');
+
+    expect(await repo.countNotes(userId, assistantId)).toBe(2);
+    expect(await repo.countNotes(other.id, assistantId)).toBe(1);
+    expect(await repo.countNotes(userId, second.id)).toBe(1);
+  });
+
+  it('counts zero rather than returning a string from Postgres', async () => {
+    const count = await repo.countNotes(userId, assistantId);
+
+    expect(count).toBe(0);
+    expect(typeof count).toBe('number');
+  });
+
   it('edits and deletes', async () => {
     const note = await repo.createNote(userId, assistantId, 'Q3', [], 'Text.');
 

@@ -12,10 +12,20 @@ import { ChatRefusalError, describeChatError } from '../llm.js';
 import { logger } from '../logger.js';
 import { memorySection, rememberExchange } from '../memory.js';
 import { notesSection } from '../notes.js';
+import { createRateLimiter } from '../rate-limit.js';
 import { loadSettings } from '../settings.js';
 import type { Views } from '../views.js';
 
 const MAX_PROMPT_CHARS = 20_000;
+/*
+ * A ceiling on messages per user. Not abuse protection so much as cost
+ * protection: every message spends OpenRouter credit, and without a limit one
+ * signed-in account — or one left open on a shared machine, or one script — can
+ * drain the balance as fast as the model streams. Generous for a person typing:
+ * 30 messages inside five minutes is a message every ten seconds, sustained.
+ */
+const MESSAGES_PER_WINDOW = 30;
+const MESSAGE_WINDOW_MS = 5 * 60 * 1000;
 /** Number of earlier messages sent along to the model as memory. */
 const HISTORY_LIMIT = 40;
 /** Title of a conversation that has not had its first message yet. */
@@ -43,6 +53,7 @@ function deriveTitle(text: string): string {
 
 export function createChatRouter({ config, repo, auth, chat, views }: ChatRouteDeps): Router {
   const router = Router();
+  const messageLimiter = createRateLimiter(MESSAGES_PER_WINDOW, MESSAGE_WINDOW_MS);
 
   const resolveAssistant = createAssistantResolver({ repo, views });
 
@@ -140,6 +151,14 @@ export function createChatRouter({ config, repo, auth, chat, views }: ChatRouteD
     }
     if (prompt.length > MAX_PROMPT_CHARS) {
       res.status(413).json({ error: `Message is too long (max ${MAX_PROMPT_CHARS} characters)` });
+      return;
+    }
+    // Per user, not per IP: the cost follows the account, and a household behind
+    // one address should not share a budget.
+    if (!messageLimiter.take(`user:${user.id}`)) {
+      res.status(429).json({
+        error: 'Too many messages in a short time. Please wait a minute and try again.',
+      });
       return;
     }
 

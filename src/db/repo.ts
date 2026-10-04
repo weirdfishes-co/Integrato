@@ -785,6 +785,15 @@ export function createRepo(db: Db, cipher: Cipher) {
       return rows.map(toNote);
     },
 
+    /** For the per-user cap; counting beats fetching every document's body. */
+    async countNotes(userId: number, assistantId: number): Promise<number> {
+      const row = await db.one<{ count: string }>(
+        'SELECT count(*) AS count FROM notes WHERE user_id = $1 AND assistant_id = $2',
+        [userId, assistantId],
+      );
+      return Number(row?.count ?? 0);
+    },
+
     async findNote(id: number, userId: number, assistantId: number): Promise<Note | null> {
       const row = await db.one<NoteRow>(
         'SELECT * FROM notes WHERE id = $1 AND user_id = $2 AND assistant_id = $3',

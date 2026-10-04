@@ -73,6 +73,26 @@ function effort(env: Env, key: string, fallback: Effort): Effort {
   return match;
 }
 
+/**
+ * How many reverse proxies sit in front, for Express's `trust proxy`.
+ *
+ * It decides whether `X-Forwarded-For` is believed, and therefore whether
+ * `req.ip` is the client or something the client can choose. Default **off**:
+ * trusting the header with no proxy in front lets anyone defeat the per-IP
+ * login limit by sending one. Behind a proxy (Railway, Fly, nginx, Cloudflare)
+ * set `TRUST_PROXY=1`, or every visitor counts as the same client.
+ */
+function trustProxy(env: Env): number | boolean {
+  const raw = env.TRUST_PROXY?.trim().toLowerCase();
+  if (!raw || raw === 'false' || raw === '0') return false;
+  if (raw === 'true') return true;
+  const hops = Number.parseInt(raw, 10);
+  if (!Number.isInteger(hops) || hops < 1) {
+    throw new Error(`TRUST_PROXY must be a positive integer, true or false, got: ${raw}`);
+  }
+  return hops;
+}
+
 export interface Config {
   readonly nodeEnv: string;
   readonly isProduction: boolean;
@@ -87,6 +107,8 @@ export interface Config {
   /** Root under which each assistant gets its own knowledge-base directory. */
   readonly assistantsDir: string;
   readonly logLevel: string;
+  /** Express `trust proxy`; see trustProxy() above. */
+  readonly trustProxy: number | boolean;
   readonly openRouterApiKey: string;
   /** Fallback model; an admin can override it at runtime on /admin. */
   readonly defaultModel: string;
@@ -228,6 +250,7 @@ export function loadConfig(env: Env = process.env): Config {
     databaseUrl: required(env, 'DATABASE_URL'),
     assistantsDir: optional(env, 'ASSISTANTS_DIR', './data/assistants'),
     logLevel: optional(env, 'LOG_LEVEL', 'info'),
+    trustProxy: trustProxy(env),
     openRouterApiKey: required(env, 'OPENROUTER_API_KEY'),
     defaultModel: optional(env, 'OPENROUTER_MODEL', 'anthropic/claude-opus-5'),
     effort: effort(env, 'MODEL_EFFORT', 'high'),

@@ -5,7 +5,7 @@ import type { Auth } from '../auth.js';
 import type { Config } from '../config.js';
 import type { Assistant, Note, Repo } from '../db/repo.js';
 import { logger } from '../logger.js';
-import { readNoteInput, MAX_NOTE_CHARS, NoteError } from '../notes.js';
+import { readNoteInput, MAX_NOTE_CHARS, MAX_NOTES_PER_USER, NoteError } from '../notes.js';
 import { loadSettings } from '../settings.js';
 import type { Views } from '../views.js';
 
@@ -124,6 +124,16 @@ export function createNoteRouter({ config, repo, auth, views }: NoteRouteDeps): 
       tags: field(req.body, 'tags'),
       content: field(req.body, 'content'),
     };
+
+    if ((await repo.countNotes(req.user!.id, assistant.id)) >= MAX_NOTES_PER_USER) {
+      res.status(400).type('html').send(
+        views.notePage(assistant, null, {
+          error: `You have reached the limit of ${MAX_NOTES_PER_USER} documents for this chatbot. Delete one to add another.`,
+          draft: submitted,
+        }),
+      );
+      return;
+    }
 
     try {
       const input = readNoteInput(submitted.name, submitted.tags, submitted.content);

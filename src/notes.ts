@@ -23,6 +23,13 @@ export const MAX_TAG_LENGTH = 32;
  */
 export const MAX_NOTES_PROMPT_CHARS = 40_000;
 
+/**
+ * How many documents one user may keep per chatbot. The prompt budget above
+ * already bounds what is *sent*, but nothing bounded what is *stored*, and
+ * unbounded rows behind an authenticated form is how a database fills up.
+ */
+export const MAX_NOTES_PER_USER = 200;
+
 /** Thrown for anything a user can fix themselves; the route shows the message. */
 export class NoteError extends Error {}
 
