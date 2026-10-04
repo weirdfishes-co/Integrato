@@ -2,6 +2,7 @@
   "name": "integrato",
   "version": "1.0.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "description": "Integrato: several configurable assistants on OpenRouter, with magic-link sign-in and PostgreSQL conversation history",
   "engines": {

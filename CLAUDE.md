@@ -21,8 +21,9 @@ knowledge base.
 `ASSISTANT_NAME` and `ASSISTANT_LANGUAGE` now only seed the *first* assistant on
 a fresh install; each assistant carries its own name and language afterwards.
 
-Status: working, deployed on Railway from the private GitHub repo
-`weirdfishes-co/aiassistant`. There is no mobile app — this is deliberately
+Status: working. MIT-licensed, at `weirdfishes-co/Integrato`. Deployed with
+Docker; a `railway.json` is included because that is where it runs, but nothing
+in the app is tied to one host. There is no mobile app — this is deliberately
 web-only (see Decisions).
 
 ## Stack

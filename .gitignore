@@ -1,10 +1,44 @@
 node_modules
 dist
+
+# Everything a running instance writes: the knowledge bases, and the SQLite
+# files from before the move to PostgreSQL.
 data
 *.db
 *.db-shm
 *.db-wal
-.env
-.env.local
+
+# Secrets and local configuration. Broader than plain `.env` on purpose: a
+# `.env.production` or `.env.backup` is one `cp` away, and the example file is
+# the only one of these that belongs in a public repository.
+.env*
+!.env.example
+
+# Credentials that arrive as files rather than as variables.
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Database dumps. A pg_dump left in the working directory holds every
+# conversation and every stored address.
+*.sql.gz
+*.dump
+*.backup
+*.bak
+
+# Tooling and editor state. .claude/ can hold settings.local.json, which
+# records approved commands and sometimes environment values.
+.claude
+.vscode
+.idea
+*.log
+npm-debug.log*
+coverage
+
+# macOS and Windows noise.
+.DS_Store
+Thumbs.db
+
 # Marketing landing page: deployed on its own server, not part of this app.
 landing

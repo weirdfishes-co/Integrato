@@ -1,590 +1,363 @@
 # Integrato
 
-A host for several configurable chat assistants, on any model OpenRouter offers.
-Each assistant has its own instructions, knowledge base, model settings and list
-of users. People sign in with a magic link — administrators with a password —
-pick an assistant they have access to, and their conversations are kept per
-assistant in PostgreSQL.
+A self-hosted host for **several chat assistants**, on any model
+[OpenRouter](https://openrouter.ai) offers. Each assistant has its own
+instructions, knowledge base, model and settings, and its own list of users.
+People sign in with a magic link — administrators with a password — pick an
+assistant they have access to, and their conversations are kept per assistant in
+PostgreSQL.
 
-- **Stack**: Node 22, TypeScript, Express 5, PostgreSQL
-- **Model access**: OpenRouter (OpenAI-compatible API), one key for every model
-- **Email**: Brevo or Mailjet HTTP API
-- **Hosting**: Railway (Dockerfile + a Postgres service + a volume for the knowledge bases)
-- **Auth**: magic link over email for users, `ADMIN_PASSWORD` for admins,
-  30-day cookie session
-- **Admin**: `/admin` for users, assistants and the OpenRouter balance;
-  `/admin/assistants/:id` for one assistant's settings, access and knowledge base
+- **Stack**: Node 22, TypeScript (ESM), Express 5, PostgreSQL. Server-rendered
+  HTML, vanilla JS and hand-written CSS on the front end — no build step for the
+  browser, no frontend framework.
+- **Models**: one OpenRouter key for every model, switchable per assistant from
+  the admin page without a redeploy.
+- **Email**: Brevo or Mailjet, over HTTPS.
+- **Runs** as a Docker image anywhere that can give it PostgreSQL and a
+  persistent volume.
 
-The product name and the answer language are configuration, not code: set
-`ASSISTANT_NAME` and `ASSISTANT_LANGUAGE` and the interface, the sign-in email
-and the system prompt follow.
+The product name and the answer language are configuration, not code. For the
+architecture and the reasoning behind the choices, see [CLAUDE.md](CLAUDE.md);
+for the visual design, [STYLE.md](STYLE.md).
 
-For the architecture and the reasoning behind the choices: see [CLAUDE.md](CLAUDE.md).
-
-## Running locally
+## Quick start
 
 ```bash
-docker run -d --name assistant-db -e POSTGRES_PASSWORD=dev \
-  -e POSTGRES_DB=assistant -p 5432:5432 postgres:17-alpine
+docker run -d --name integrato-db -e POSTGRES_PASSWORD=dev \
+  -e POSTGRES_DB=integrato -p 5432:5432 postgres:17-alpine
 
 npm install
-cp .env.example .env      # fill in DATABASE_URL, OPENROUTER_API_KEY,
-                          # ADMIN_EMAILS, ADMIN_PASSWORD, mail
-npm run dev               # http://localhost:3000
+cp .env.example .env     # DATABASE_URL, OPENROUTER_API_KEY, ADMIN_EMAILS,
+                         # ADMIN_PASSWORD, EMAIL_ENCRYPTION_KEY
+npm run dev              # http://localhost:3000
 ```
 
-The schema is created automatically: migrations run in-process at startup
-against `DATABASE_URL`. The addresses in `ADMIN_EMAILS` are written into the
-user list as admins on every boot, so you can always get in: sign in on `/login`
-with one of those addresses plus `ADMIN_PASSWORD`. No email is sent for an
-admin, so the app is usable before any mail account exists.
+The schema creates itself: migrations run in-process at startup. The addresses
+in `ADMIN_EMAILS` are written into the user list as admins on every boot, so you
+can always get in — sign in on `/login` with one of them plus `ADMIN_PASSWORD`.
+Admins are never emailed a link, so the app is usable before any mail account
+exists.
 
-`npm test` needs Docker too — it starts a throwaway PostgreSQL container and
-runs the real migrations against it, so a mistake in the SQL fails in the suite
-rather than in production.
-
-**Sending mail.** Set `MAIL_FROM` and the credentials of **one** provider:
-`BREVO_API_KEY` (Brevo → SMTP & API → API Keys), or `MAILJET_API_KEY` together
-with `MAILJET_SECRET_KEY`. Both are HTTP APIs; SMTP was removed after Railway
-proved unable to open a connection to Brevo's SMTP port on 587, 2525 or 465,
-while port 443 worked without trouble. Outbound SMTP ports are often blocked —
-by the host or by the mail provider — which surfaces as `Connection timeout` and
-no email. If both providers are configured the app refuses to start until
-`MAIL_PROVIDER=brevo` or `mailjet` says which one sends; it will not pick one
-silently. `MAIL_PROVIDER` naming a provider whose credentials are missing is
-refused too.
-
-**Signing in without a mail account.** Leave both providers' keys empty and the
-sign-in link is written to the log instead of emailed:
+**Signing in with no mail account at all.** Leave both providers' keys empty and
+the sign-in link is written to the log instead:
 
 ```
 SIGN-IN LINK (dev mode, not emailed)  link: http://localhost:3000/auth/callback?token=...
 ```
 
-Paste that URL into your browser and you are in. This only works outside
-production: with `NODE_ENV=production` a mail provider is required, so a sign-in
-link can never end up in a log file there.
-
-Other scripts:
+Paste it into the browser. This works only outside production: with
+`NODE_ENV=production` a mail provider is required, so a link can never end up in
+a log file there.
 
 ```bash
-npm run build       # bundles the server to dist/server.js
-npm start           # runs the built server
+npm run dev         # watch mode
+npm run build       # bundle the server to dist/server.js
+npm start           # run the built server
 npm run typecheck   # tsc --noEmit
-npm test            # vitest
+npm test            # vitest — needs Docker; see Development
 ```
 
-## Styling
+## Configuration
 
-The interface follows [STYLE.md](STYLE.md). Colour comes from the
-[Forest Green and Brown](https://colorschemes.net/palettes/forest-green-and-brown)
-palette; the type scale, the square corners and the breakpoints were
-reverse-engineered from https://g.ieffe.dev. `public/styles.css` names the five
-palette colours once and binds semantic names (`--bg`, `--text`, `--accent`, …)
-to them, so changing the look means changing the tokens and the type scale, not
-the components.
+Read once at startup; anything missing or contradictory fails the boot rather
+than the first request. [`.env.example`](.env.example) is the template.
 
-Montserrat and Lato are self-hosted from `public/fonts/` — no CDN request, and
-the app works offline. There is no logo image anywhere, including in the
-sign-in email: the product name is set as text, so nothing depends on a mail
-client allowing images.
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `DATABASE_URL` | yes | PostgreSQL connection string |
+| `OPENROUTER_API_KEY` | yes | From [openrouter.ai/keys](https://openrouter.ai/keys) |
+| `ADMIN_EMAILS` | yes | Comma-separated; always granted admin rights at boot |
+| `ADMIN_PASSWORD` | yes | Shared by those addresses; ≥ 12 characters in production |
+| `EMAIL_ENCRYPTION_KEY` | yes | Encrypts stored addresses; ≥ 32 characters (`openssl rand -base64 32`). **Back it up** — lose or change it and no stored address can be read again |
+| `APP_URL` | no, but set it | Public URL, default `http://localhost:3000`. **Magic links are built on it**, so an unset value in production emails links pointing at localhost. `https://` sets the Secure cookie flag |
+| `BREVO_API_KEY` | one provider | Brevo HTTP API key |
+| `MAILJET_API_KEY` + `MAILJET_SECRET_KEY` | one provider | Mailjet's key pair; half a pair is refused |
+| `MAIL_PROVIDER` | only if both | `brevo` or `mailjet`. With both configured the app refuses to start until this says which one sends |
+| `MAIL_FROM` | no | e.g. `Integrato <noreply@example.com>`. Must be a sender the provider has verified |
+| `ASSISTANTS_DIR` | no | Where knowledge bases live, default `/data/assistants` in the image. **Keep it on a volume**, and never relative when deployed |
+| `ASSISTANT_NAME` / `ASSISTANT_LANGUAGE` | no | Seed the *first* assistant only; each carries its own afterwards |
+| `OPENROUTER_MODEL` | no | Starting model until an admin picks one |
+| `MODEL_EFFORT` / `MODEL_MAX_TOKENS` | no | `high`, `8000` |
+| `OPENROUTER_SITE_URL` / `OPENROUTER_SITE_NAME` | no | Attribution on the OpenRouter rankings |
+| `SESSION_DAYS` / `LOGIN_TOKEN_MINUTES` | no | 30 days, 30 minutes |
+| `PORT` / `NODE_ENV` / `LOG_LEVEL` | no | `3000`, `development`, `info` |
 
-**Every one of the five palette colours is dark** — there is no light tone in it
-at all, so the page ground, the surface tints, the hover states, the red and
-amber for status, and the dark theme were all decided here. Each is marked in
-the stylesheet where it appears. Every pairing clears WCAG AA; the lowest in use
-is the sidebar's white links at 5.18:1.
-
-Two conventions are worth knowing before you change anything:
-
-- **Links are bold and coloured rather than underlined**, because most of them
-  stand alone — a row of actions, a breadcrumb, a name in a table. A link
-  *inside* a sentence keeps its underline, since weight and colour alone do not
-  pick it out of a paragraph.
-- **The sidebar runs on the sage green**, the lightest of the five, with bold
-  white links on it. Its rows have no hover fill: the conversation you are in is
-  the only one marked, and hovering a row reveals its delete button instead.
+Both mail providers are HTTP APIs on port 443. There is no SMTP transport:
+outbound SMTP ports are blocked often enough — by hosts and by mail providers —
+that a transport which works in one environment and silently times out in
+another is worse than not having it.
 
 ## Assistants
 
-An admin creates assistants on **`/admin`**. Each one gets:
+An admin creates them on **`/admin`**. Each gets:
 
-- its own **address**, `/<slug>`, derived from the name when it is created.
-  Names that would collide with a built-in path (`admin`, `api`, `login`, …)
-  get a numbered slug instead, so the assistant stays reachable. The old
-  `/a/<slug>` form redirects to the new one. An admin can **change the address**
-  later in the Address field of the identity form: the knowledge-base folder is
-  renamed to match, and the previous address keeps redirecting (301) to the new
-  one for anyone who may use the chatbot. The change is refused when another
-  chatbot has that address, when it is a reserved word, or when a folder of that
-  name already exists on the volume (a deleted chatbot leaves its files behind).
-  Open chat pages need a reload afterwards
-- its own **welcome message**, shown in an empty conversation (500 characters;
-  empty falls back to a built-in sentence)
-- its own **instructions and knowledge base**, under
-  `<ASSISTANTS_DIR>/<slug>/instr.md` and `<ASSISTANTS_DIR>/<slug>/context/*.md`
-- its own **model and settings** — see [Assistant settings](#assistant-settings)
-- its own **user list** — the rights matrix on the assistant's admin page
+- an **address**, `/<slug>`, derived from its name. A name that would collide
+  with a built-in path (`admin`, `api`, `login`, …) gets a numbered slug, so the
+  assistant stays reachable. The address is editable later: the knowledge-base
+  folder moves with it and the old address keeps redirecting. Open chat pages
+  need a reload afterwards.
+- a **welcome message** for an empty conversation (500 characters)
+- its **instructions and knowledge base**, under
+  `<ASSISTANTS_DIR>/<slug>/instr.md` and `<slug>/context/*.md`
+- its own **model and settings** (below), and its own **user list**
 
 **Access.** Admins may use every assistant. Everyone else sees only what they
-were granted; an assistant a user may not use answers 404, so the names of other
-assistants are not exposed. After signing in a user lands on a picker showing
-their assistants — or goes straight into the chat when they have exactly one.
+were granted, and an assistant a user may not use answers **404** — so the names
+of other assistants are not exposed. After signing in a user lands on a picker,
+or goes straight into the chat when they have exactly one.
 
-**Isolation.** Conversations and remembered facts are stored per user *and* per
-assistant. Nothing a user tells one assistant reaches another.
+**Isolation.** Conversations, remembered facts and users' own documents are
+stored per user *and* per assistant. Nothing crosses between them.
 
-**Deleting** an assistant — the Delete beside Open in the assistants table, or
-the button on its own page — removes its conversations, memories, settings and
-grants. Its knowledge-base files are deliberately left on disk, so a mistaken
-click does not destroy documents that took work to write. Nothing stops you
-deleting the last assistant; a fresh one is created on the next boot, but the
-deleted conversations are gone.
+**Deleting** an assistant removes its conversations, memories, settings and
+grants, but deliberately leaves its knowledge-base files on disk, so a mistaken
+click does not destroy documents that took work to write.
 
-## Changing the instructions and context
+### Instructions and knowledge base
 
-Each assistant has its own copy of these; edit them on its admin page under
-**Knowledge base**. The files in the repo are only the seed for a *newly
-created* assistant.
+Each assistant has its own copy; edit them on its admin page under **Knowledge
+base** — no file access needed. The files in the repo are only the seed for a
+*newly created* assistant.
 
-- **`instr.md`** is the system prompt. The rule "always answer in the
-  assistant's language" is appended automatically — you do not need to put it in
-  there. [`instr.example.md`](instr.example.md) holds a neutral starting point.
-- **`context/*.md`** are sent along as knowledge base, alphabetically by file
-  name. The directory ships empty; add documents on the assistant's Knowledge
-  base page.
-- A placeholder such as `{Global.Guidelines}` in `instr.md` is replaced by the
-  content of `context/Guidelines.md`.
+- **`instr.md`** is the system prompt. "Always answer in the assistant's
+  language" is appended automatically. [`instr.example.md`](instr.example.md) is
+  a neutral starting point.
+- **`context/*.md`** are sent as the knowledge base, alphabetically by file name.
+- `{Global.Guidelines}` in the prompt is replaced by `context/Guidelines.md`.
 
-Both are re-read on every question as soon as the file changes — no restart
-needed.
+Both are re-read as soon as they change — no restart. File names may contain
+letters, digits, `-` and `_` and must end in `.md`; 512 kB per document. A new
+assistant is seeded from the bundled files once, and existing content is never
+overwritten.
 
-### Through the admin page
+## Settings, per assistant
 
-An admin does not need file access for this: on an assistant's **Knowledge
-base** page (`/admin/assistants/:id/content`) you can read
-and edit the base prompt, and create, upload (several `.md` files at once), edit
-and delete context documents. The matching `{Global.…}` placeholder is listed
-next to each document.
-
-File names may only contain letters, digits, `-` and `_` and must end in `.md` —
-the same character range that works in a placeholder. Maximum 512 kB per
-document.
-
-**Where those files land** is decided by `ASSISTANTS_DIR`, under which each
-assistant gets `<slug>/instr.md` and `<slug>/context/`. In the Docker image it
-points at `/data` — so at the Railway volume, because otherwise every admin
-change would disappear on the next deploy. A newly created assistant is seeded
-there from the bundled files once; existing content is never overwritten.
-
-## The chat screen
-
-**Answers are rendered as Markdown.** Models write it whether or not you ask
-them to, so headings, bold, lists, tables and code blocks appear as formatting
-rather than as `**asterisks**` and `### hashes`. A user's own message is shown
-exactly as they typed it.
-
-The renderer is [`public/markdown.js`](public/markdown.js), about 200 lines, no
-dependency. It escapes the text *first* and applies the Markdown rules to the
-escaped result, so nothing a model writes can become HTML — a `javascript:`
-link, a `<script>` tag or a quote smuggled into a URL all stay inert, and there
-are tests for each.
-
-**Under the composer is a closed strip, "How this chatbot is set up."** Opening
-it lists the model, the answer language, reasoning effort, sampling, whether
-routing is restricted to the EU, whether messages are anonymized, and whether
-web search, memory, citations and compaction are on.
-
-It is shown to **every user, not only admins**. Which model answers, whether a
-message is anonymized before it is sent and whether it may leave the EU are
-things the person typing has a fair claim to know, and a setting nobody can see
-is a setting nobody can hold you to. Nothing in it is a secret: no key, no
-system prompt, no user list.
-
-### Tokens and cost
-
-Under every answer is a line like `1,234 in · 567 out · $0.0031`, and the setup
-strip carries the running total for the conversation. Reasoning and cached
-tokens are added when the provider reports any:
-
-```
-48 in · 244 out · 242 thinking · $0.000624
-```
-
-That example is real, and it is the reason this is worth showing: the answer was
-the word "Ok.", and 242 of its 244 output tokens were reasoning the user never
-saw but did pay for. Reasoning effort has a price, and now it is visible.
-
-**The cost is OpenRouter's own figure, not a price computed from a rate card.**
-It arrives in the final chunk of the stream (`usage.cost`) and is stored as it
-came, so it already accounts for cache discounts and per-provider pricing.
-
-Two limits worth knowing:
-
-- **Memory extraction and compaction are not in the figure.** Each is a separate
-  model call, billed separately, and the number under an answer is what that
-  answer's own call reported. With both settings on, the true cost of an
-  exchange is higher than what is shown. `/admin` shows the account balance,
-  which does include everything.
-- **Answers from before this existed show no line at all**, and neither does an
-  answer whose connection dropped before the provider sent its usage. That is
-  deliberately blank rather than zero — zero would claim the answer was free.
-
-## Letting users write their own documents
-
-Switch on **"Let users write their own documents"** on a chatbot's admin page and
-its users get a **My documents** link in the sidebar: a Markdown editor they can
-use instead of asking a question.
-
-A document is written or pasted, given a name and tags, and saved — **Save**
-stays in the editor, **Save and finish** returns to the list. The date is added
-for you, and so is the name if you leave it empty: it is taken from the first
-line, heading marks and all removed. Tags are lowercased and de-duplicated, so
-"Goals" and "goals" are one tag. The editor shows a live preview, rendered by
-the same code that renders the chatbot's answers, so what you see is what a
-reply would look like.
-
-From then on, everything in the list is sent along with every question that user
-asks that chatbot. The documents arrive as:
-
-```
-<document name="Q3 goals" tags="goals, planning" written="2026-10-02">
-...what you wrote...
-</document>
-```
-
-**They are per user and per chatbot.** Nobody else sees your documents, not even
-an admin, and a document written for one chatbot never reaches another. They are
-stored in the database rather than on the volume for exactly that reason — the
-knowledge base directories are shared by everyone who may use a chatbot, which
-is the wrong boundary for this.
-
-Worth knowing:
-
-- **A document is the user's material, not an instruction.** The prompt says so
-  explicitly, so a document that happens to read like an order ("ignore your
-  rules") is treated as something the user wrote rather than something the
-  chatbot must obey. It is a prompt instruction, so it is a strong default and
-  not a guarantee.
-- **Limits**: 20,000 characters per document, and 40,000 characters of documents
-  in one prompt. Past that the **oldest** are left out and the prompt says which
-  ones, so the chatbot can tell the user that a document was not loaded. The
-  alternative — letting the prompt grow until a request fails — would surface
-  months later as an error nobody could connect to its cause.
-- **Deleting a document removes it from the next question onwards.** It does not
-  edit conversations that already happened.
-- **There is no admin view of what users wrote.** That is deliberate for now;
-  the chatbot's own answers are the only place those documents surface.
-
-Users of a chatbot that does **not** have the setting get a 404 on those
-addresses, the same as for a chatbot that does not exist.
-
-## Running on free models
-
-OpenRouter carries ~20 models priced at zero (`:free` suffix, plus a few
-previews). They work here with no credit balance at all — `MODEL_MAX_TOKENS=8000`
-is accepted, because the request costs nothing to reserve. Limits are 20 requests
-per minute and 50 per day; buying $10 of credits raises the daily cap to 1000.
-
-Two caveats:
-
-- **A negative balance can still block you.** OpenRouter returns 402 on free
-  models too once the account is overdrawn, so keep it at zero or above.
-- **Web search is billed separately**, even on a free model — roughly $0.007 per
-  search. It is the one setting on `/admin` that costs money regardless of the
-  model.
-
-**Quality varies far more than on paid models.** Some free reasoning models write
-their chain of thought into the answer itself rather than into the reasoning
-channel, which shows up as an answer that reads like a monologue about the
-question — `nvidia/nemotron-3.5-lightning:free` does exactly that. If you see it,
-switch model; no setting can fix it from this side. Models that behaved well in
-testing: `nvidia/nemotron-3-ultra-550b-a55b:free`, `poolside/laguna-s-2.1:free`,
-`dots-studio/dots-3-note-preview:free`.
-
-## When an answer fails
-
-The chat screen names the cause rather than showing one generic error:
-
-| Message | What to do |
-| --- | --- |
-| …too little credit for this request | Add credit at OpenRouter, or lower `MODEL_MAX_TOKENS` |
-| The OpenRouter key was rejected | Check `OPENROUTER_API_KEY` in the environment |
-| This model is not available on OpenRouter, or not from the region… | Pick another model, or switch EU-only routing off |
-| …may only use providers in the EU, and this model has none | Pick a model with a European endpoint |
-| Too many requests at once | Wait a moment and retry |
-| The model provider is unavailable | Retry shortly; the fault is upstream |
-
-A telling pattern: if a `:free` model answers but a paid one fails, the key is
-out of credit — free models run on an empty balance, paid ones do not. Note that
-a deployed instance can hold a *different* key from your local `.env`.
-
-The full provider error, including its metadata, is always in the server log.
-
-## Watching the balance
-
-`/admin` shows what is left at OpenRouter, because an empty account is the most
-likely reason for the assistant to stop answering. Two numbers appear, and they
-are not the same thing:
-
-- **Remaining** — credits added minus everything spent. This is the number a
-  402 measures. Green above $1, amber below, red at zero or less.
-- **Key cap** — an optional spending limit on the API key. A key can show plenty
-  of headroom here while the account itself is empty, so never read this one
-  alone.
-
-The figures are cached for 30 seconds. If OpenRouter cannot be reached the panel
-says so and the rest of the page still works.
-
-## Assistant settings
-
-Everything below lives on an assistant's page under **`/admin`** and is stored in
-the database *per assistant*, so a change applies from the next message on — no
-restart, no redeploy.
+Stored in the database, so a change applies from the next message — no restart.
 
 | Setting | What it does |
 | --- | --- |
-| **Model** | Any model OpenRouter offers, with context size and price shown |
-| **Identity** | The chatbot's name, address (`/<slug>`), description, answer language and welcome message |
-| **Reasoning effort** | `low` … `max`. Models without reasoning support ignore it |
-| **Show thinking** | Streams the model's reasoning above the answer, collapsed |
-| **Web search** | Look things up beyond the knowledge base; billed per search |
-| **Domain limits** | Restrict search to, or exclude, specific domains |
-| **Temperature / Top-P** | How freely the model picks its words. Empty = the model's own default |
-| **EU-only routing** | Restrict every request to providers serving from an EU/EEA data centre |
-| **Anonymization** | Replace personal data with placeholders before a message leaves |
-| **Own documents** | Give users a Markdown editor; what they write is carried in the prompt |
-| **Memory** | Remember durable facts about a user across their conversations |
-| **Citations** | Ask the assistant to mark which document a statement came from |
-| **Compaction** | Summarize long threads instead of dropping the oldest messages |
-| **Admins can read conversations** | Adds a *Conversations* page under the chatbot in `/admin` listing every user's threads. Off by default |
-
-**Admins can read conversations.** Off by default, and the chat's setup strip
-tells users which way it is set ("Administrators can read these
-conversations"). Messages are shown exactly as stored: anonymization only changes
-what the model sees, never what is kept. It does not cover users' own
-documents, which stay private to their author.
-
-Three of these are built in this app rather than provided by OpenRouter, which
-is worth knowing when judging how reliable they are:
-
-- **Memory** is a second, cheap model call after each answer that extracts
-  durable facts ("Works as a recruiter at Acme.") into the `memories` table, per
-  user *and* per assistant. They are prepended to the system prompt in later
-  conversations. At most 10 facts per exchange and the 40 most recent are sent.
-  It costs one extra call per message and never blocks the reply — a failure is
-  logged and ignored.
-
-  Two limits worth knowing before switching it on: **deleting a conversation
-  does not erase facts already extracted from it**, and there is no page yet to
-  see or delete what an assistant remembers about someone. With memory off,
-  deleting a conversation really is complete forgetting.
-- **Citations** are prompt-enforced, not API-guaranteed: the model is asked to
-  write `[Guidelines.md]` after a sentence drawn from that document. A model can
-  forget or invent one, unlike a provider-level citation API.
-- **Compaction** folds everything older than the last 20 messages into a running
-  summary once a thread passes 40 messages, and carries that summary as context.
-  Without it the oldest messages are simply dropped.
-
-**Web search domains.** Fill in "only these domains" to whitelist, or "never
-these domains" to blacklist — one per line, wildcards allowed (`*.substack.com`).
-Some search engines accept only one of the two lists, so the whitelist wins when
-both are filled in. Google's engine ignores domain filtering entirely.
-
-### Temperature and Top-P
-
-Both are **empty by default, and empty is not zero**: nothing is sent and the
-model uses the default its provider tuned. That matters — several reasoning
-models reject a temperature outright, and a picked-at-random 0.7 would be a
-worse answer than no answer to the question.
-
-Temperature runs 0–2, Top-P 0–1. Convention is to set one or the other, not
-both. When the chosen model supports neither, the page says so under the fields
-rather than letting you wonder why nothing changed.
-
-The two settings apply to the **answer only**. Memory extraction and compaction
-keep the model's defaults: a temperature chosen to make a chatbot livelier has
-no business loosening a fact-extraction call.
+| **Model** | Any model OpenRouter offers, with context size and price shown. Falls back to a text field if the catalogue cannot be fetched |
+| **Identity** | Name, address, description, answer language, welcome message |
+| **Reasoning effort** | `low` … `max`; models without reasoning ignore it |
+| **Show thinking** | Streams the reasoning above the answer, collapsed |
+| **Temperature / Top-P** | Empty — the default — sends nothing, so the model uses the one its provider tuned. Several reasoning models reject a temperature outright. Applies to answers only, never to memory or compaction |
+| **Web search** | Look things up beyond the knowledge base. Billed per search (~$0.007), whatever the model costs |
+| **Domain limits** | One domain per line, wildcards allowed. Some engines accept only one of the two lists, so "only these" wins when both are filled in |
+| **EU-only routing** | See below |
+| **Anonymization** | See below |
+| **Own documents** | See below |
+| **Memory** | A second, cheap call after each answer extracts durable facts into the database, per user and per assistant, and prepends them to later prompts. Never blocks a reply. **Deleting a conversation does not erase facts already taken from it**, and there is no page yet to see or clear them |
+| **Citations** | Asks the model to mark the document a statement came from. Prompt-enforced, so a model can forget or invent one |
+| **Compaction** | Past 40 messages, folds everything older than the last 20 into a running summary instead of dropping it |
+| **Admins can read conversations** | Adds a *Conversations* page under the assistant in `/admin`, listing every user's threads. **Off by default**, and the chat tells users which way it is set. Messages are shown as stored; it does not cover users' own documents |
 
 ### EU-only routing
 
 OpenRouter serves most models from several places — `azure/eu`,
-`amazon-bedrock/eu-west-1`, `google-vertex/europe` are separate endpoints from
-their American siblings. With this on:
+`amazon-bedrock/eu-west-1` and `google-vertex/europe` are separate endpoints
+from their American siblings. With this on:
 
-- the **model picker** shows only models OpenRouter can serve from Europe
-  (~70 of ~460), asked for with its own `region=eu` filter
-- **every request** carries the European endpoint tags for that model with
-  fallbacks switched off, so OpenRouter may not route elsewhere when they are
-  busy — it refuses instead
-- **saving is refused** if no European provider serves the model you picked,
-  with the reason on the page, rather than failing later on every message
+- the model picker shows only models OpenRouter can serve from Europe
+- every request carries that model's European endpoints with fallbacks off, so
+  OpenRouter **refuses rather than reroutes** when they are busy
+- saving is refused if no European provider serves the chosen model, with the
+  reason on the page, instead of failing later on every message
 
-An endpoint tagged `global` does not count. It includes Europe but is not
-limited to it, which is the whole question being asked here.
-
-This is about where the request is *served*. It says nothing about where
-OpenRouter itself sits, and nothing about a provider's own retention policy.
+An endpoint tagged `global` does not count: it includes Europe without being
+limited to it. This is about where a request is *served* — it says nothing about
+where OpenRouter sits, or about a provider's retention policy.
 
 ### Anonymization
 
-With this on, a user's message is rewritten before it goes to the model:
+A user's message is rewritten before it goes to the model. Each match becomes a
+placeholder (`<IBAN_1>`, `<EMAIL_ADDRESS_2>`), and one value keeps one
+placeholder for the whole conversation, so the model can still tell two
+accounts apart.
 
-| Recognized | How it is verified |
+| Recognized | Verified by |
 | --- | --- |
 | Email address | pattern |
-| IBAN | mod-97 check — a string that passes *is* an IBAN |
-| Card number | Luhn check, 13–19 digits |
+| IBAN | mod-97 — a string that passes *is* an IBAN |
+| Card number | Luhn, 13–19 digits |
 | BSN | Dutch 11-proef |
-| Phone number | shape: a country code or trunk zero, 9–15 digits |
+| Phone number | shape: country code or trunk zero, 9–15 digits |
 | IP address | pattern |
-| Dutch postcode | four digits and two capitals |
+| Dutch postcode | four digits, two capitals |
 
-Each becomes a placeholder — `<IBAN_1>`, `<EMAIL_ADDRESS_2>` — and **one value
-keeps one placeholder for the whole conversation**, so the model can still tell
-two accounts or two addresses apart.
-
-It needs no configuration and no service: it runs in this process, so there is
-nothing to deploy, nothing to reach over the network and nothing to fail.
+It runs in-process: nothing to deploy, nothing to reach over the network.
 
 **It does not catch names.** Recognizing that "Priya Raghunathan" is a person
-needs a trained model, and no regular expression does it. That is a deliberate
-choice rather than an oversight: the pure-JavaScript alternative is a name
-lexicon, which finds the names it has seen and misses the rest *silently* —
-disproportionately non-Western names. For a privacy control, a gap you can see
-beats a gap you cannot.
+needs a trained model, and no regular expression does it — so this is a stated
+limit rather than a silent one. Everything it does find it finds exactly: every
+rule above has a checksum or a strict shape behind it, and it is tested against
+the false positives that matter — years, order numbers, prices, version strings,
+ISBNs and room numbers all pass through untouched.
 
-Everything it does find, it finds exactly. Every rule above has a checksum or a
-strict shape behind it, and it is tested against the false positives that
-matter: years ("between 2019 and 2024 we doubled"), order numbers, KvK numbers,
-prices, version strings, ISBNs and room numbers all pass through untouched.
+Two more things: the **original is still stored** (only the copy sent to the
+model is rewritten), and the **answer comes back in placeholders** — nothing
+substitutes them back. The knowledge base and system prompt are not anonymized.
 
-Two more things to know:
+### Users' own documents
 
-- **The original is still stored here.** Only the copy going to the model is
-  rewritten — your own database keeps what the user typed.
-- **The answer comes back in placeholders.** Ask "which account was that?" and
-  the reply discusses `<IBAN_1>`. Nothing substitutes them back yet.
+With this on, users get a **Documents** link in the chat sidebar: a Markdown
+editor to use instead of asking a question. A document is named, tagged and
+dated, and from then on travels with every question that user asks that
+assistant, as:
 
-The knowledge base and the system prompt are *not* anonymized: they are the
-admin's own text, and rewriting them would cost the prompt cache on every
-request.
+```
+<document name="Q3 goals" tags="goals, planning" written="2026-10-02">
+...what they wrote...
+</document>
+```
 
-## Choosing the model
+They are **per user and per assistant** — nobody else sees them, not even an
+admin, and they never reach another assistant. The prompt states that they are
+the user's material and not instructions, so a document that reads like an order
+is not followed as one; being prompt-enforced, that is a strong default rather
+than a guarantee.
 
-`OPENROUTER_MODEL` only sets the *starting* model. An admin picks the actual one
-on **`/admin`** from a live list of everything OpenRouter offers, with context
-size and price per million tokens shown next to each. The choice is stored in the
-database, so it survives a redeploy and takes effect on the next message — no
-restart needed.
+Limits: 20,000 characters per document, 40,000 characters of documents in one
+prompt. Past that the **oldest are left out** and the prompt names them, so the
+assistant can say a document was not loaded. Deleting a document removes it from
+the next question on; it does not rewrite past conversations.
 
-If the model list cannot be fetched, the picker falls back to a text field where
-you can type an OpenRouter model id (`vendor/model`) by hand.
+## The chat screen
 
-`MODEL_EFFORT` and `MODEL_MAX_TOKENS` are the environment's starting values;
-effort is editable on `/admin` afterwards. Note that OpenRouter rejects a request
-when `MODEL_MAX_TOKENS` exceeds what your remaining credit can cover, so a large
-value on a nearly empty key fails with a 402 before the model is ever called. A
-burst of requests can hit the same 402 through the separate in-flight budget,
-which the `Retry-After` header times.
+**Answers are rendered as Markdown**, because models write it whether or not you
+ask. The renderer is [`public/markdown.js`](public/markdown.js) — about 200
+lines, no dependency. It escapes the text *first* and applies the Markdown rules
+to the escaped result, so nothing a model writes can become HTML; a
+`javascript:` link, a `<script>` tag and a quote smuggled into a URL all stay
+inert, with a test for each. A user's own message is shown exactly as typed.
 
-## Deploying on Railway
+**Under every answer**: `1,234 in · 567 out · $0.0031`, with reasoning and
+cached tokens added when the provider reports them. The cost is OpenRouter's own
+figure from the end of the stream, not a price computed from a rate card, so it
+already accounts for cache discounts and per-provider pricing. Memory extraction
+and compaction are separate calls and are **not** in it, so with those on an
+exchange costs more than the line says. No line at all means no usage was
+reported — deliberately blank rather than zero.
 
-1. **Create a service** from this repo. Railway picks up `railway.json` and
-   builds with the `Dockerfile`.
-2. **Add a PostgreSQL service** from Railway's plugin list. It provides
-   `DATABASE_URL`; reference it from the app service and the schema is created
-   on the first boot.
-3. **Attach a volume** with mount path `/data`. The database no longer lives
-   here, but the per-assistant knowledge bases do — without a volume every
-   document an admin writes is gone on the next deploy.
-4. **Set the environment variables** (see `.env.example`):
+**A closed strip, "How this chatbot is set up"**, lists the model, language,
+effort, sampling, EU routing, anonymization and the feature toggles. It is shown
+to every user, not only admins: which model answers, and whether a message is
+anonymized or may leave the EU, are things the person typing has a fair claim to
+know. Nothing in it is a secret — no key, no system prompt, no user list.
 
-   | Variable | Required | Notes |
-   | --- | --- | --- |
-   | `DATABASE_URL` | yes | PostgreSQL connection string; Railway's Postgres service supplies it |
-   | `OPENROUTER_API_KEY` | yes | API key from [openrouter.ai/keys](https://openrouter.ai/keys) |
-   | `ADMIN_EMAILS` | yes | Comma-separated admins; always granted rights at boot |
-   | `ADMIN_PASSWORD` | yes | Shared password for those addresses. Admins sign in with it instead of a magic link; at least 12 characters in production |
-   | `EMAIL_ENCRYPTION_KEY` | yes | Encrypts user email addresses in the database; at least 32 characters (`openssl rand -base64 32`). **Back it up**: if it is lost or changed, the stored addresses cannot be read again |
-   | `BREVO_API_KEY` | one provider | Brevo HTTP API key. Production needs Brevo or Mailjet |
-   | `MAILJET_API_KEY` / `MAILJET_SECRET_KEY` | one provider | Mailjet's key pair; setting only one of the two is refused |
-   | `MAIL_PROVIDER` | only if both | `brevo` or `mailjet`. Required when both providers are configured; the app will not guess |
-   | `MAIL_FROM` | no | Sender, e.g. `Integrato <noreply@yourdomain.com>`. Must be a sender the provider has verified |
-   | `ASSISTANT_NAME` | no | Name of the *first* assistant on a fresh install, and the sign-in email's sender name |
-   | `ASSISTANT_LANGUAGE` | no | Answer language of the first assistant; each assistant carries its own afterwards |
-   | `APP_URL` | yes | Public URL, e.g. `https://assistant.up.railway.app`. Magic links are built on this; `https://` sets the Secure flag on the cookie |
-   | `ASSISTANTS_DIR` | no | Default `/data/assistants` in the image — one directory per assistant. Keep it on the volume, or every knowledge base is lost on deploy |
-   | `OPENROUTER_MODEL` | no | Starting model, default `anthropic/claude-opus-5`. An admin's choice on `/admin` overrides it |
-   | `MODEL_EFFORT` / `MODEL_MAX_TOKENS` | no | Default `high` and `8000`. Effort is `low`–`max`; only reasoning models act on it |
-   | `OPENROUTER_SITE_URL` / `OPENROUTER_SITE_NAME` | no | Optional attribution on the openrouter.ai rankings |
-   | `SESSION_DAYS` / `LOGIN_TOKEN_MINUTES` | no | Default 30 days and 30 minutes. `LOGIN_TOKEN_MINUTES` only affects the magic links non-admins receive |
-   | `LOG_LEVEL` | no | pino level, default `info` |
-   | `NODE_ENV` | no | `production` turns on the stricter checks (mail provider required, 12-character admin password). The image sets it |
-   | `PORT` | no | Default 3000. Railway sets it itself |
+## Deploying
 
-   Railway sets `PORT` itself; the server binds on `0.0.0.0`. Do not set
-   `ASSISTANTS_DIR` to a relative path — the image already points it at the
-   volume, and a relative value resolves inside `/app`, where the server cannot
-   write. `DATABASE_PATH`, `CONTEXT_DIR` and `INSTRUCTIONS_PATH` are gone; remove
-   them if they are still set.
-5. **Volume ownership is handled for you.** The mounted volume arrives owned by
-   root; `scripts/entrypoint.sh` takes ownership of it and then runs the server
-   as the unprivileged `node` user.
-6. **The health check** is on `/healthz`. Migrations run inside the server
-   process, so there is no separate migration command.
+The app is a Docker image with two requirements: **a PostgreSQL database** and
+**a persistent volume** for the knowledge bases.
 
-Test the container locally the way Railway runs it:
+1. Build from the [`Dockerfile`](Dockerfile). Migrations run inside the server
+   process at boot, so there is no separate migration step.
+2. Provide `DATABASE_URL` pointing at PostgreSQL.
+3. Mount a volume at **`/data`**. The database does not live there, but the
+   per-assistant knowledge bases do — without it, every document an admin writes
+   is gone on the next deploy. The volume arrives owned by root on most hosts;
+   [`scripts/entrypoint.sh`](scripts/entrypoint.sh) takes ownership and then
+   drops to the unprivileged `node` user.
+4. Set the environment (above). The server binds `0.0.0.0` on `PORT`, which
+   hosts usually set themselves.
+5. Health check: **`/healthz`**.
+
+Any container host works. A [`railway.json`](railway.json) is included for
+Railway, which needs no further configuration beyond a Postgres service and a
+volume; Fly, Render, Cloud Run, Kubernetes or a plain Docker host need only the
+five points above.
+
+Run it locally exactly as a host would:
 
 ```bash
-docker build -t ai-assistant .
+docker build -t integrato .
 docker run --rm -p 3000:3000 \
+  -e DATABASE_URL=postgres://postgres:dev@host.docker.internal:5432/integrato \
   -e OPENROUTER_API_KEY=sk-or-v1-... \
   -e ADMIN_EMAILS=you@example.com \
   -e ADMIN_PASSWORD=a-long-password \
   -e EMAIL_ENCRYPTION_KEY=$(openssl rand -base64 32) \
-  -e BREVO_API_KEY=xkeysib-... \
   -e APP_URL=http://localhost:3000 \
   -v "$PWD/data:/data" \
-  ai-assistant
+  integrato
 ```
+
+## When something fails
+
+The chat names the cause instead of showing one generic error:
+
+| Message | What to do |
+| --- | --- |
+| …too little credit for this request | Add credit at OpenRouter, or lower `MODEL_MAX_TOKENS` |
+| The OpenRouter key was rejected | Check `OPENROUTER_API_KEY` |
+| …not available, or not from the region… | Pick another model, or switch EU-only routing off |
+| …may only use providers in the EU, and this model has none | Pick a model with a European endpoint |
+| Too many requests at once | Wait and retry |
+| The model provider is unavailable | Retry; the fault is upstream |
+
+If a `:free` model answers but a paid one fails, the key is out of credit — free
+models run on an empty balance, paid ones do not. A deployed instance can hold a
+different key from your local `.env`. The full provider error is always in the
+server log.
+
+`MODEL_MAX_TOKENS` is checked against your *remaining credit*, not just the
+model: a large value on a nearly empty account fails with a 402 before the model
+runs. A burst of concurrent requests can hit a second, separate 402 for the
+in-flight budget, which clears on its own.
+
+**`/admin` shows the OpenRouter balance**, since an empty account is the likeliest
+reason answers stop. Two numbers appear and they are not the same thing:
+*Remaining* is credits minus spend, which is what a 402 measures; *Key cap* is an
+optional spending limit on the key, which can show plenty of headroom while the
+account itself is empty. Never read the cap alone.
+
+Free models (`:free`) need no balance, but a *negative* balance blocks them too,
+and web search still bills whatever the model costs.
 
 ## Security
 
-- Sign-in tokens and session tokens are stored as a SHA-256 hash only.
-- User email addresses are encrypted in the database (AES-256-GCM, key from
-  `EMAIL_ENCRYPTION_KEY`) and looked up through an HMAC of the address. Addresses
-  from before this existed are converted on the first boot. The key is not
-  recoverable: back it up. The server log still contains addresses on failed
-  sign-ins and mail errors.
-- A sign-in link works once and expires after `LOGIN_TOKEN_MINUTES`.
-- `ADMIN_PASSWORD` is compared in constant time and is never written to the log.
-  It is shared by every address in `ADMIN_EMAILS`, so the audit trail says
-  *which admin* signed in but not that they alone knew the password — rotate it
-  whenever someone stops being an admin.
-- The login form never reveals whether an address exists, and is limited to
-  5 attempts per fifteen minutes per address and per IP. Submitting a password
-  returns one message for every failure, so it cannot be used to test addresses;
-  submitting an *empty* password does reveal whether an address is an admin,
-  which is the price of telling admins to use their password instead of waiting
-  for an email that never comes.
-- Session cookies are `httpOnly` + `sameSite=lax`, and `secure` as soon as
-  `APP_URL` is on `https://`.
-- A session lasts `SESSION_DAYS` (30) from signing in and is **not** extended by
-  activity, so an active user still signs in again after 30 days. Expiry is
-  checked against the database on every request as well as by the cookie, so a
-  copied cookie stops working too. Signing out deletes the row immediately.
-  Sessions are per browser: phone and laptop expire independently.
-- Conversation history is walled off per user: the owner is part of the SQL
-  query, not a check afterwards.
-- The knowledge base page only writes inside the context directory: file names
-  are validated *and* the resolved path is checked against the base directory,
-  so `../` or an absolute path cannot write outside it.
-- Remembered facts and conversations are read with both the owner and the
-  assistant in the SQL, so nothing crosses between users or between assistants.
-- An assistant a user may not use is indistinguishable from one that does not
-  exist: both answer 404.
-- The server runs as the unprivileged `node` user; only the entrypoint that
-  takes ownership of the volume runs as root, for a moment at startup.
-- Secrets stay in the environment: `.env`, the database and the `data/` directory
-  are all in `.gitignore` and never enter the image or the repository.
+- Sign-in and session tokens are stored as a SHA-256 hash only. A sign-in link
+  works once and expires after `LOGIN_TOKEN_MINUTES`.
+- **User email addresses are encrypted at rest** (AES-256-GCM) and looked up
+  through an HMAC of the address, both keyed from `EMAIL_ENCRYPTION_KEY`. The key
+  is not recoverable — back it up. Addresses still appear in the server log on
+  failed sign-ins and mail errors; encrypting the table does not cover logs.
+- `ADMIN_PASSWORD` is compared in constant time and never logged. It is shared by
+  every address in `ADMIN_EMAILS`, so the audit trail says *which* admin signed
+  in but not that they alone knew the password — rotate it when someone stops
+  being an admin.
+- The login form never reveals whether an address exists and allows 5 attempts
+  per 15 minutes, per address and per IP. Submitting an *empty* password does
+  reveal whether an address is an admin, which is the price of telling admins to
+  use their password rather than wait for an email that never comes.
+- Session cookies are `httpOnly` + `sameSite=lax`, and `secure` once `APP_URL`
+  is `https://`. A session lasts `SESSION_DAYS` from sign-in and is **not**
+  extended by activity. Expiry is checked against the database on every request,
+  so a copied cookie stops working too.
+- Conversations, memories and documents are walled off per user *and* per
+  assistant in the SQL itself, not by a check afterwards.
+- The knowledge-base page validates file names **and** checks the resolved path
+  against the base directory, so `../` cannot write outside it.
+- The server runs as the unprivileged `node` user.
+- `.env`, the database and `data/` are gitignored and never enter the image.
+
+## Development
+
+```bash
+npm run typecheck && npm test && npm run build
+```
+
+`npm test` **needs Docker**: the suite starts one throwaway PostgreSQL container
+and runs the real migrations against it, each test getting its own schema. An
+in-memory stand-in was rejected because it would accept SQL that PostgreSQL
+rejects, which is the one thing these tests exist to catch.
+
+The front end has no build step — `public/` is served as written, so a browser
+file can be edited and reloaded. Server-side HTML lives in `src/views.ts` and
+goes through `escapeHtml`.
+
+## License
+
+[MIT](LICENSE) © WeirdFishes.
+
+The bundled `instr.md` and `context/` are only seeds for a newly created
+assistant; what a deployment actually runs lives on its own volume.
