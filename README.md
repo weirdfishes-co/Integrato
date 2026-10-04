@@ -1,5 +1,7 @@
 # Integrato
 
+**[integrato.cc](https://integrato.cc)** · [MIT licensed](LICENSE)
+
 A self-hosted host for **several chat assistants**, on any model
 [OpenRouter](https://openrouter.ai) offers. Each assistant has its own
 instructions, knowledge base, model and settings, and its own list of users.
@@ -357,7 +359,7 @@ goes through `escapeHtml`.
 
 ## License
 
-[MIT](LICENSE) © WeirdFishes.
+[MIT](LICENSE) © WeirdFishes. Project site: [integrato.cc](https://integrato.cc).
 
 The bundled `instr.md` and `context/` are only seeds for a newly created
 assistant; what a deployment actually runs lives on its own volume.
