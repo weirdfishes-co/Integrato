@@ -352,7 +352,8 @@ and web search still bills whatever the model costs.
   fetches nothing from anywhere — self-hosted fonts, no CDN, no inline script or
   `style=` attribute — so the policy needs no escape hatch. It is the second
   line behind the Markdown renderer's escaping. Sent with `nosniff`,
-  `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`.
+  `X-Frame-Options: DENY` and `Referrer-Policy: same-origin` (nothing is sent
+  to another origin, so a sign-in token cannot leave in a Referer).
 - **Confirmation prompts carry no code.** A delete confirmation is a
   `data-confirm` attribute read as text, never an `onsubmit` handler — an HTML
   attribute holding JavaScript needs JavaScript escaping, and HTML escaping

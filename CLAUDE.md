@@ -319,6 +319,14 @@ context/*.md         knowledge base seeded into a brand-new assistant
   nothing. A request with neither `Origin` nor `Referer` is allowed: browsers
   always send one on a POST, so that is a non-browser client with no ambient
   cookie.
+- **`Referrer-Policy` is `same-origin`, never `no-referrer`.** They aim at the
+  same thing — a sign-in token must not leave in a Referer — and `same-origin`
+  gets it: nothing at all goes to another origin. `no-referrer` looks stricter
+  and takes the site down, because it also makes a browser send `Origin: null`
+  on a *same-origin* form post, which the origin guard reads as an opaque
+  origin and refuses. Every login returned 403. The unit tests fabricate
+  headers, so they could not see it; it took Chromium driving a real form, and
+  `tests/security.test.ts` now pins the value with that reason attached.
 - **`trust proxy` is configuration, and defaults to off.** Believing
   `X-Forwarded-For` with nothing in front lets any caller choose their own
   `req.ip` and walk past the per-IP login limit. The opposite mistake — off

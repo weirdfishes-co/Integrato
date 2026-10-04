@@ -44,9 +44,21 @@ export function securityHeaders() {
     // something executable.
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
-    // Sign-in links arrive as a query string; this keeps them out of the
-    // Referer header on any navigation away from the callback.
-    res.setHeader('Referrer-Policy', 'no-referrer');
+    /*
+     * `same-origin`, and deliberately **not** `no-referrer`.
+     *
+     * The goal is the same — a sign-in token arrives in a query string and must
+     * never leave in a Referer — and `same-origin` achieves it: nothing at all
+     * is sent to another origin, while our own pages still see a full referrer.
+     *
+     * `no-referrer` looks stricter and breaks the site. It also makes the
+     * browser send `Origin: null` on a *same-origin* form post, which the
+     * origin guard below rightly reads as an opaque origin and refuses — so
+     * every login returned 403. The unit tests could not see it, because they
+     * fabricate headers rather than ask a browser. Verified with Chromium
+     * driving a real form.
+     */
+    res.setHeader('Referrer-Policy', 'same-origin');
     next();
   };
 }

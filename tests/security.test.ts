@@ -73,7 +73,20 @@ describe('security headers', () => {
 
     expect(headers.get('x-content-type-options')).toBe('nosniff');
     expect(headers.get('x-frame-options')).toBe('DENY');
-    expect(headers.get('referrer-policy')).toBe('no-referrer');
+  });
+
+  /*
+   * This one is load-bearing. `no-referrer` also makes a browser send
+   * `Origin: null` on a same-origin form post, which the origin guard reads as
+   * an opaque origin and refuses — together they rejected every login. It was
+   * only visible with a real browser, because these tests fabricate headers.
+   * `same-origin` sends nothing to other origins, which was the point.
+   */
+  it('uses same-origin referrer policy, never no-referrer', () => {
+    const { res, headers } = fakeResponse();
+    securityHeaders()(request('GET', {}), res, vi.fn() as unknown as NextFunction);
+
+    expect(headers.get('referrer-policy')).toBe('same-origin');
   });
 });
 
