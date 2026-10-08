@@ -1,6 +1,7 @@
 import type { Config, Effort } from './config.js';
 import { EFFORT_LEVELS } from './config.js';
 import type { Repo } from './db/repo.js';
+import { isAspectRatio, isVoice } from './kinds.js';
 
 /**
  * Settings an admin controls on /admin. They live in the database so a change
@@ -51,6 +52,17 @@ export interface AssistantSettings {
    */
   temperature: number | null;
   topP: number | null;
+  /**
+   * Image shape, for a text-to-image chatbot. Null sends nothing and lets the
+   * model choose. Only the ratios OpenRouter enumerates are accepted; it
+   * rejects anything else.
+   */
+  aspectRatio: string | null;
+  /**
+   * Which voice a text-to-speech chatbot speaks in. Null sends nothing and
+   * leaves it to the model.
+   */
+  voice: string | null;
 }
 
 const KEYS = {
@@ -70,6 +82,8 @@ const KEYS = {
   adminConversationLog: 'admin_conversation_log',
   temperature: 'temperature',
   topP: 'top_p',
+  aspectRatio: 'aspect_ratio',
+  voice: 'voice',
 } as const;
 
 export type SettingKey = keyof typeof KEYS;
@@ -160,6 +174,8 @@ export async function loadSettings(
     adminConversationLog: readBoolean(stored, KEYS.adminConversationLog, false),
     temperature: readNumber(stored, KEYS.temperature, MAX_TEMPERATURE),
     topP: readNumber(stored, KEYS.topP, MAX_TOP_P),
+    aspectRatio: isAspectRatio(stored.get(KEYS.aspectRatio)) ? stored.get(KEYS.aspectRatio)! : null,
+    voice: isVoice(stored.get(KEYS.voice)) ? stored.get(KEYS.voice)! : null,
   };
 }
 
@@ -185,4 +201,6 @@ export async function saveSettings(
   await repo.setSetting(assistantId, KEYS.adminConversationLog, settings.adminConversationLog ? '1' : '0');
   await repo.setSetting(assistantId, KEYS.temperature, settings.temperature === null ? '' : String(settings.temperature));
   await repo.setSetting(assistantId, KEYS.topP, settings.topP === null ? '' : String(settings.topP));
+  await repo.setSetting(assistantId, KEYS.aspectRatio, settings.aspectRatio ?? '');
+  await repo.setSetting(assistantId, KEYS.voice, settings.voice ?? '');
 }

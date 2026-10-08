@@ -17,7 +17,8 @@ import { EFFORT_LEVELS, normalizeEmail, type Config, type Effort } from '../conf
 import type { ContentPaths } from '../content.js';
 import type { Assistant, Repo } from '../db/repo.js';
 import { logger } from '../logger.js';
-import { euProviderTags, listModels, type ModelOption } from '../models.js';
+import { isAspectRatio, isAssistantKind, isVoice, DEFAULT_KIND, type AssistantKind } from '../kinds.js';
+import { euProviderTags, listModelsForKind, type ModelOption } from '../models.js';
 import {
   loadSettings,
   parseDomains,
@@ -79,9 +80,11 @@ export function createAdminRouter({
    * the whole one, so the picker cannot suggest a model the routing rules will
    * then refuse.
    */
-  async function modelChoices(euOnly: boolean): Promise<ModelOption[]> {
+  async function modelChoices(euOnly: boolean, kind: AssistantKind): Promise<ModelOption[]> {
     try {
-      return await listModels(euOnly ? { region: 'eu' } : {});
+      // Filtered by modality: offering a text model to an image chatbot would
+      // produce a chatbot that fails on its first message.
+      return await listModelsForKind(kind, euOnly ? { region: 'eu' } : {});
     } catch (error) {
       logger.warn({ err: error }, 'could not load the OpenRouter model list');
       return [];
@@ -110,7 +113,7 @@ export function createAdminRouter({
       repo.listGrantedUserIds(assistant.id),
       repo.usageByUser(assistant.id),
     ]);
-    const models = await modelChoices(settings.euOnly);
+    const models = await modelChoices(settings.euOnly, assistant.kind);
 
     return views.assistantPage(assistant, {
       ...notice,
@@ -180,9 +183,12 @@ export function createAdminRouter({
         return;
       }
 
+      const kindValue = text(req.body, 'kind');
+      const kind: AssistantKind = isAssistantKind(kindValue) ? kindValue : DEFAULT_KIND;
+
       const taken = new Set((await repo.listAssistants()).map((entry) => entry.slug));
       const slug = uniqueSlug(slugify(name), (candidate) => taken.has(candidate));
-      const assistant = await repo.createAssistant(slug, name, '', config.assistantLanguage);
+      const assistant = await repo.createAssistant(slug, name, '', config.assistantLanguage, kind);
       await provisionAssistant(config, assistant, bundledContent);
 
       logger.info({ by: req.user!.id, slug, name }, 'assistant created');
@@ -205,7 +211,8 @@ export function createAdminRouter({
 
     const name = text(req.body, 'name');
     const description = text(req.body, 'description').slice(0, MAX_DESCRIPTION_LENGTH);
-    const language = text(req.body, 'language');
+    // A kind without the field (speech to text) posts none: keep what is stored.
+    const language = text(req.body, 'language') || assistant.language;
     // Cut rather than refuse: maxlength on the field already stops an honest
     // browser, and losing a long paste is worse than silently trimming it.
     const welcome = text(req.body, 'welcome').slice(0, MAX_WELCOME_LENGTH);
@@ -231,7 +238,10 @@ export function createAdminRouter({
       }
     }
 
-    await repo.updateAssistant(assistant.id, name, description, language, welcome);
+    const kindValue = text(req.body, 'kind');
+    const kind: AssistantKind = isAssistantKind(kindValue) ? kindValue : assistant.kind;
+
+    await repo.updateAssistant(assistant.id, name, description, language, welcome, kind);
     logger.info({ by: req.user!.id, assistantId: assistant.id }, 'assistant updated');
     res.redirect(`/admin/assistants/${assistant.id}?ok=${encodeURIComponent('Identity saved.')}`);
   });
@@ -270,6 +280,12 @@ export function createAdminRouter({
       adminConversationLog: checked(req.body, 'admin_conversation_log'),
       temperature: parseSampling(text(req.body, 'temperature'), MAX_TEMPERATURE),
       topP: parseSampling(text(req.body, 'top_p'), MAX_TOP_P),
+      // Only the ratios OpenRouter enumerates; anything else it refuses.
+      aspectRatio: isAspectRatio(text(req.body, 'aspect_ratio'))
+        ? text(req.body, 'aspect_ratio')
+        : null,
+      // The provider refuses an unknown voice, so only known ones are stored.
+      voice: isVoice(text(req.body, 'voice')) ? text(req.body, 'voice') : null,
     };
 
     // Say no here rather than on the first message. The two settings that can

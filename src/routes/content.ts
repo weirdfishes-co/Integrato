@@ -6,6 +6,7 @@ import type { Config } from '../config.js';
 import { ContentError, createContentStore, MAX_DOCUMENT_BYTES, type ContentStore } from '../content.js';
 import type { Assistant, Repo } from '../db/repo.js';
 import { logger } from '../logger.js';
+import { convertPdf, pdfBody } from './pdf.js';
 import { instructionsDescription } from '../views.js';
 import type { Views } from '../views.js';
 
@@ -196,6 +197,12 @@ export function createContentRouter({ auth, views, config, repo }: ContentRouteD
     } catch (error) {
       fail(error, res, next, found.base);
     }
+  });
+
+  /** PDF in, Markdown out; the browser then saves it through /upload like any .md file. */
+  router.post('/pdf', pdfBody, async (req, res) => {
+    if (!(await resolve(req, res))) return;
+    await convertPdf(req, res);
   });
 
   /** JSON upload: [{ name, content }]. Existing files are overwritten. */

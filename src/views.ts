@@ -1,4 +1,13 @@
 import { MAX_WELCOME_LENGTH } from './assistants.js';
+import {
+  kindHasSetting,
+  kindSpec,
+  ASPECT_RATIOS,
+  ASSISTANT_KINDS,
+  DEFAULT_KIND,
+  KINDS,
+  VOICES,
+} from './kinds.js';
 import type { Balance } from './balance.js';
 import { COMPACT_THRESHOLD } from './compaction.js';
 import type { DocumentSummary } from './content.js';
@@ -193,23 +202,26 @@ function setupFooter(assistant: Assistant, settings: AssistantSettings): string 
         <dl class="setup__list">
 ${[
   settingRow('Model', settings.model),
-  settingRow('Answers in', assistant.language),
+  ...(kindHasSetting(assistant.kind, 'language') ? [settingRow('Answers in', assistant.language)] : []),
   settingRow('Reasoning effort', settings.effort, settings.showThinking ? 'shown above the answer' : undefined),
-  settingRow(
-    'Sampling',
-    sampling.length > 0 ? sampling.join(', ') : "the model's own defaults",
-  ),
+  ...(kindHasSetting(assistant.kind, 'sampling')
+    ? [settingRow('Sampling', sampling.length > 0 ? sampling.join(', ') : "the model's own defaults")]
+    : []),
   settingRow(
     'Providers',
     settings.euOnly ? 'EU and EEA data centres only' : 'no regional restriction',
   ),
-  settingRow(
-    'Anonymization',
-    onOff(settings.anonymize),
-    settings.anonymize
-      ? 'email, phone, IBAN, card, BSN, IP and postcode are replaced before sending — names are not'
-      : undefined,
-  ),
+  ...(kindHasSetting(assistant.kind, 'anonymize')
+    ? [
+        settingRow(
+          'Anonymization',
+          onOff(settings.anonymize),
+          settings.anonymize
+            ? 'email, phone, IBAN, card, BSN, IP and postcode are replaced before sending — names are not'
+            : undefined,
+        ),
+      ]
+    : []),
   settingRow('Web search', onOff(settings.webSearch), search),
   settingRow(
     'Remembers you between conversations',
@@ -403,6 +415,7 @@ ${passwordField}
     },
 
     chatPage(user, assistant, showBackToPicker, settings) {
+      const spec = kindSpec(assistant.kind);
       const label = escapeHtml(assistant.name);
       const brand = escapeHtml(shorten(assistant.name, MAX_BRAND_CHARS));
       return layout({
@@ -411,6 +424,8 @@ ${passwordField}
         body: `    <div class="app" data-email="${escapeHtml(user.email)}" data-assistant="${label}"
          data-slug="${escapeHtml(assistant.slug)}"
          data-welcome="${escapeHtml(assistant.welcome)}"
+         data-kind="${assistant.kind}"
+         data-accepts="${spec.accepts}"
          data-version="${ASSET_VERSION}">
       <aside class="sidebar" id="sidebar">
         <div class="sidebar__head">
@@ -444,8 +459,23 @@ ${passwordField}
         <div class="messages" id="messages" aria-live="polite"></div>
 
         <form class="composer" id="composer">
+${
+  spec.accepts === 'audio'
+    ? `          <label class="composer__attach" for="recording" title="Choose a recording">
+            <input id="recording" name="recording" type="file" accept="audio/*">
+            <span class="composer__attach-label">Choose a recording</span>
+            <span class="composer__attach-name" id="recording-name"></span>
+          </label>`
+    : ''
+}
           <label class="visually-hidden" for="prompt">Your message</label>
-          <textarea id="prompt" name="prompt" rows="1" placeholder="Ask your question…" autocomplete="off"></textarea>
+          <textarea id="prompt" name="prompt" rows="1" placeholder="${
+            spec.accepts === 'audio'
+              ? 'Anything to add? (optional)'
+              : spec.produces === 'image'
+                ? 'Describe the picture…'
+                : 'Ask your question…'
+          }" autocomplete="off"></textarea>
           <button type="submit" id="send" aria-label="Send">Send</button>
         </form>
 
@@ -559,8 +589,18 @@ ${assistantRows}
         <form method="post" action="/admin/assistants" class="row row--form">
           <label class="visually-hidden" for="new-assistant">Name</label>
           <input id="new-assistant" name="name" type="text" required placeholder="New chatbot name">
+          <label class="visually-hidden" for="new-kind">Type</label>
+          <select id="new-kind" name="kind">
+${ASSISTANT_KINDS.map(
+  (kind) =>
+    `            <option value="${kind}"${kind === DEFAULT_KIND ? ' selected' : ''}>${escapeHtml(
+      KINDS[kind].label,
+    )}${KINDS[kind].ready ? '' : ' (not working yet)'}</option>`,
+).join('\n')}
+          </select>
           <button type="submit" class="secondary">Create</button>
         </form>
+        <p class="muted small">The type decides which models and settings a chatbot has. It can be changed afterwards, but the model has to be picked again.</p>
       </section>
 
       <section class="panel">
@@ -627,6 +667,175 @@ ${(options.effortLevels ?? [])
           ? ' <strong>This model accepts neither setting</strong> — both are ignored for it.'
           : '';
 
+      const kind = kindSpec(assistant.kind);
+      const shows = (setting: Parameters<typeof kindHasSetting>[1]): boolean =>
+        kindHasSetting(assistant.kind, setting);
+
+      /*
+       * Each block is built here and dropped into the form below, so the
+       * template stays readable and a kind that does not use a setting renders
+       * nothing at all rather than a disabled field. Marked-up help text is the
+       * only reason these are strings and not a loop.
+       */
+      const reasoningBlock = !shows('effort')
+        ? ''
+        : `          <div class="field">
+            <label for="effort">Reasoning effort</label>
+            ${effortField}
+            <p class="muted small">Deeper reasoning costs more and answers slower. Models without reasoning support ignore this.</p>
+          </div>
+${
+  shows('thinking')
+    ? `
+          <label class="checkbox">
+            <input type="checkbox" name="show_thinking" value="1"${settings?.showThinking ? ' checked' : ''}>
+            Show the model's thinking above the answer
+          </label>`
+    : ''
+}
+
+          <hr>
+`;
+
+      const samplingBlock = !shows('sampling')
+        ? ''
+        : `          <div class="field">
+            <label for="temperature">Temperature</label>
+            <input id="temperature" name="temperature" type="number" step="0.05"
+                   min="0" max="${options.maxTemperature ?? 2}"
+                   value="${settings?.temperature ?? ''}" placeholder="model default">
+            <p class="muted small">How freely the model picks its words: low is predictable, high is inventive. Leave it empty to use the model's own default.</p>
+          </div>
+
+          <div class="field">
+            <label for="top_p">Top-P</label>
+            <input id="top_p" name="top_p" type="number" step="0.05"
+                   min="0" max="${options.maxTopP ?? 1}"
+                   value="${settings?.topP ?? ''}" placeholder="model default">
+            <p class="muted small">Narrows the words it may choose from. Usually you set this <em>or</em> the temperature, not both.${samplingWarning}</p>
+          </div>
+
+          <hr>
+`;
+
+      const voiceBlock = !shows('voice')
+        ? ''
+        : `          <div class="field">
+            <label for="voice">Voice</label>
+            <select id="voice" name="voice">
+              <option value=""${settings?.voice ? '' : ' selected'}>model default</option>
+${VOICES.map(
+  (option) =>
+    `              <option value="${option}"${
+      settings?.voice === option ? ' selected' : ''
+    }>${option}</option>`,
+).join('\n')}
+            </select>
+            <p class="muted small">The provider refuses a voice it does not have, so only names known to work are offered. Not every speaking model has all of them.</p>
+          </div>
+
+          <hr>
+`;
+
+      const aspectBlock = !shows('aspectRatio')
+        ? ''
+        : `          <div class="field">
+            <label for="aspect_ratio">Image shape</label>
+            <select id="aspect_ratio" name="aspect_ratio">
+              <option value=""${settings?.aspectRatio ? '' : ' selected'}>model default</option>
+${ASPECT_RATIOS.map(
+  (ratio) =>
+    `              <option value="${ratio}"${
+      settings?.aspectRatio === ratio ? ' selected' : ''
+    }>${ratio}</option>`,
+).join('\n')}
+            </select>
+            <p class="muted small">The aspect ratio asked of the model. These are the only values OpenRouter accepts; it refuses anything else.</p>
+          </div>
+
+          <hr>
+`;
+
+      const searchBlock = !shows('webSearch')
+        ? ''
+        : `          <label class="checkbox">
+            <input type="checkbox" name="web_search" value="1"${settings?.webSearch ? ' checked' : ''}>
+            Web search
+          </label>
+          <p class="muted small">Lets the chatbot look things up beyond the knowledge base. Billed per search on top of the model.</p>
+
+          <div class="field">
+            <label for="web_search_max_results">Results per search</label>
+            <input id="web_search_max_results" name="web_search_max_results" type="number"
+                   min="1" max="${options.maxSearchResults ?? 20}" value="${settings?.webSearchMaxResults ?? 5}">
+          </div>
+
+          <div class="field">
+            <label for="web_search_include_domains">Only these domains</label>
+            <textarea id="web_search_include_domains" name="web_search_include_domains" rows="3"
+                      placeholder="example.com&#10;*.gov.uk">${escapeHtml(
+                        (settings?.webSearchIncludeDomains ?? []).join('\n'),
+                      )}</textarea>
+            <p class="muted small">One per line. Leave empty to search the whole web. Wildcards allowed (<code>*.substack.com</code>).</p>
+          </div>
+
+          <div class="field">
+            <label for="web_search_exclude_domains">Never these domains</label>
+            <textarea id="web_search_exclude_domains" name="web_search_exclude_domains" rows="3"
+                      placeholder="reddit.com">${escapeHtml(
+                        (settings?.webSearchExcludeDomains ?? []).join('\n'),
+                      )}</textarea>
+            <p class="muted small">Ignored when the list above is filled in — some search engines accept only one of the two.</p>
+          </div>
+
+          <hr>
+`;
+
+      const anonymizeBlock = !shows('anonymize')
+        ? ''
+        : `          <label class="checkbox">
+            <input type="checkbox" name="anonymize" value="1"${settings?.anonymize ? ' checked' : ''}>
+            Anonymize messages before sending them
+          </label>
+          <p class="muted small">Replaces email addresses, phone numbers, IBANs, card numbers, BSNs, IP addresses and Dutch postcodes with placeholders (<code>&lt;IBAN_1&gt;</code>) before a message leaves. The original stays stored here, and the answer comes back written in terms of the placeholders.</p>
+          <p class="muted small"><strong>It does not catch names.</strong> Recognizing a name needs a language model, which this runs without on purpose — every rule here is a pattern with a checksum, so it is exact about what it does find.</p>
+
+          <hr>
+`;
+
+      const textFeatureBlock = [
+        shows('memory')
+          ? `          <label class="checkbox">
+            <input type="checkbox" name="memory" value="1"${settings?.memory ? ' checked' : ''}>
+            Remember users across conversations
+          </label>
+          <p class="muted small">Facts are remembered per user <em>and</em> per chatbot, so nothing crosses between chatbots.</p>`
+          : '',
+        shows('citations')
+          ? `          <label class="checkbox">
+            <input type="checkbox" name="citations" value="1"${settings?.citations ? ' checked' : ''}>
+            Cite knowledge-base documents
+          </label>
+          <p class="muted small">The chatbot marks which document a statement came from, like [Guidelines.md].</p>`
+          : '',
+        shows('notes')
+          ? `          <label class="checkbox">
+            <input type="checkbox" name="notes" value="1"${settings?.notes ? ' checked' : ''}>
+            Let users write their own documents
+          </label>
+          <p class="muted small">Adds a Markdown editor, so a user can write or paste text instead of asking a question. Their documents are carried in this chatbot's prompt — per user, so nobody sees anyone else's.</p>`
+          : '',
+        shows('compaction')
+          ? `          <label class="checkbox">
+            <input type="checkbox" name="compaction" value="1"${settings?.compaction ? ' checked' : ''}>
+            Summarize long conversations
+          </label>
+          <p class="muted small">Past ${COMPACT_THRESHOLD} messages the oldest are folded into a summary instead of being dropped.</p>`
+          : '',
+      ]
+        .filter((block) => block.length > 0)
+        .join('\n\n');
+
       const userRows = (options.users ?? [])
         .map(
           (user) => `          <tr>
@@ -691,9 +900,25 @@ ${(options.effortLevels ?? [])
                    value="${escapeHtml(assistant.description)}" placeholder="Shown on the assistant picker">
           </div>
           <div class="field">
+            <label for="kind">Type</label>
+            <select id="kind" name="kind">
+${ASSISTANT_KINDS.map(
+  (option) =>
+    `              <option value="${option}"${
+      option === assistant.kind ? ' selected' : ''
+    }>${escapeHtml(KINDS[option].label)}${KINDS[option].ready ? '' : ' (not working yet)'}</option>`,
+).join('\n')}
+            </select>
+            <p class="muted small">${escapeHtml(kind.summary)} Changing it changes which models and settings apply, so <strong>pick the model again afterwards</strong> — the one saved now will not be in the new list.</p>
+          </div>
+${
+  kindHasSetting(assistant.kind, 'language')
+    ? `          <div class="field">
             <label for="language">Answer language</label>
             <input id="language" name="language" type="text" required value="${escapeHtml(assistant.language)}">
-          </div>
+          </div>`
+    : ''
+}
           <div class="field">
             <label for="welcome">Welcome message</label>
             <textarea id="welcome" name="welcome" rows="4" maxlength="${MAX_WELCOME_LENGTH}"
@@ -714,6 +939,13 @@ ${(options.effortLevels ?? [])
       <section class="panel">
         <h2>Chatbot settings</h2>
         <p class="muted small">Applies to this chatbot only, from the next message on.</p>
+        ${
+          kind.ready
+            ? ''
+            : `<p class="notice notice--error">This type cannot answer yet: the chat has no runtime for ${escapeHtml(
+                kind.label,
+              )}. Everything below saves, but a user would get an error.</p>`
+        }
         <form method="post" action="/admin/assistants/${assistant.id}/settings" class="settings">
 
           <label class="checkbox">
@@ -727,111 +959,19 @@ ${(options.effortLevels ?? [])
           <div class="field">
             <label for="model">Model</label>
             ${modelField}
-            ${
-              settings?.euOnly
-                ? '<p class="muted small">Only models OpenRouter can serve from the EU are listed, because this chatbot is restricted to European providers.</p>'
-                : ''
-            }
+            <p class="muted small">Only models that can do <strong>${escapeHtml(
+              kind.label.toLowerCase(),
+            )}</strong> are listed${
+              settings?.euOnly ? ', and only those OpenRouter can serve from the EU' : ''
+            }.</p>
           </div>
 
-          <div class="field">
-            <label for="effort">Reasoning effort</label>
-            ${effortField}
-            <p class="muted small">Deeper reasoning costs more and answers slower. Models without reasoning support ignore this.</p>
-          </div>
-
-          <label class="checkbox">
-            <input type="checkbox" name="show_thinking" value="1"${settings?.showThinking ? ' checked' : ''}>
-            Show the model's thinking above the answer
-          </label>
+${reasoningBlock}${samplingBlock}${aspectBlock}${voiceBlock}${searchBlock}${anonymizeBlock}${
+          textFeatureBlock.length > 0 ? `${textFeatureBlock}
 
           <hr>
-
-          <div class="field">
-            <label for="temperature">Temperature</label>
-            <input id="temperature" name="temperature" type="number" step="0.05"
-                   min="0" max="${options.maxTemperature ?? 2}"
-                   value="${settings?.temperature ?? ''}" placeholder="model default">
-            <p class="muted small">How freely the model picks its words: low is predictable, high is inventive. Leave it empty to use the model's own default.</p>
-          </div>
-
-          <div class="field">
-            <label for="top_p">Top-P</label>
-            <input id="top_p" name="top_p" type="number" step="0.05"
-                   min="0" max="${options.maxTopP ?? 1}"
-                   value="${settings?.topP ?? ''}" placeholder="model default">
-            <p class="muted small">Narrows the words it may choose from. Usually you set this <em>or</em> the temperature, not both.${samplingWarning}</p>
-          </div>
-
-          <hr>
-
-          <label class="checkbox">
-            <input type="checkbox" name="web_search" value="1"${settings?.webSearch ? ' checked' : ''}>
-            Web search
-          </label>
-          <p class="muted small">Lets the chatbot look things up beyond the knowledge base. Billed per search on top of the model.</p>
-
-          <div class="field">
-            <label for="web_search_max_results">Results per search</label>
-            <input id="web_search_max_results" name="web_search_max_results" type="number"
-                   min="1" max="${options.maxSearchResults ?? 20}" value="${settings?.webSearchMaxResults ?? 5}">
-          </div>
-
-          <div class="field">
-            <label for="web_search_include_domains">Only these domains</label>
-            <textarea id="web_search_include_domains" name="web_search_include_domains" rows="3"
-                      placeholder="example.com&#10;*.gov.uk">${escapeHtml(
-                        (settings?.webSearchIncludeDomains ?? []).join('\n'),
-                      )}</textarea>
-            <p class="muted small">One per line. Leave empty to search the whole web. Wildcards allowed (<code>*.substack.com</code>).</p>
-          </div>
-
-          <div class="field">
-            <label for="web_search_exclude_domains">Never these domains</label>
-            <textarea id="web_search_exclude_domains" name="web_search_exclude_domains" rows="3"
-                      placeholder="reddit.com">${escapeHtml(
-                        (settings?.webSearchExcludeDomains ?? []).join('\n'),
-                      )}</textarea>
-            <p class="muted small">Ignored when the list above is filled in — some search engines accept only one of the two.</p>
-          </div>
-
-          <hr>
-
-          <label class="checkbox">
-            <input type="checkbox" name="anonymize" value="1"${settings?.anonymize ? ' checked' : ''}>
-            Anonymize messages before sending them
-          </label>
-          <p class="muted small">Replaces email addresses, phone numbers, IBANs, card numbers, BSNs, IP addresses and Dutch postcodes with placeholders (<code>&lt;IBAN_1&gt;</code>) before a message leaves. The original stays stored here, and the answer comes back written in terms of the placeholders.</p>
-          <p class="muted small"><strong>It does not catch names.</strong> Recognizing a name needs a language model, which this runs without on purpose — every rule here is a pattern with a checksum, so it is exact about what it does find.</p>
-
-          <hr>
-
-          <label class="checkbox">
-            <input type="checkbox" name="memory" value="1"${settings?.memory ? ' checked' : ''}>
-            Remember users across conversations
-          </label>
-          <p class="muted small">Facts are remembered per user <em>and</em> per chatbot, so nothing crosses between chatbots.</p>
-
-          <label class="checkbox">
-            <input type="checkbox" name="citations" value="1"${settings?.citations ? ' checked' : ''}>
-            Cite knowledge-base documents
-          </label>
-          <p class="muted small">The chatbot marks which document a statement came from, like [Guidelines.md].</p>
-
-          <label class="checkbox">
-            <input type="checkbox" name="notes" value="1"${settings?.notes ? ' checked' : ''}>
-            Let users write their own documents
-          </label>
-          <p class="muted small">Adds a Markdown editor, so a user can write or paste text instead of asking a question. Their documents are carried in this chatbot's prompt — per user, so nobody sees anyone else's.</p>
-
-          <label class="checkbox">
-            <input type="checkbox" name="compaction" value="1"${settings?.compaction ? ' checked' : ''}>
-            Summarize long conversations
-          </label>
-          <p class="muted small">Past ${COMPACT_THRESHOLD} messages the oldest are folded into a summary instead of being dropped.</p>
-
-          <hr>
-
+` : ''
+        }
           <label class="checkbox">
             <input type="checkbox" name="admin_conversation_log" value="1"${
               settings?.adminConversationLog ? ' checked' : ''
@@ -907,7 +1047,7 @@ ${userRows}
       return layout({
         title: `Knowledge base — ${options.assistant.name}`,
         scripts: ['/upload.js'],
-        body: `    <main class="page" data-upload="${escapeHtml(base)}/upload" data-base="${escapeHtml(base)}">
+        body: `    <main class="page" data-upload="${escapeHtml(base)}/upload" data-pdf="${escapeHtml(base)}/pdf" data-base="${escapeHtml(base)}">
       <header class="page__head">
         <h1>Knowledge base — ${escapeHtml(options.assistant.name)}</h1>
         <div class="row">
@@ -954,8 +1094,9 @@ ${rows}
         </form>
 
         <form method="post" action="${base}/upload" id="upload-form" class="stack">
-          <label for="upload">Or upload existing .md files</label>
-          <input id="upload" type="file" accept=".md,text/markdown" multiple>
+          <label for="upload">Or upload existing .md or .pdf files</label>
+          <input id="upload" type="file" accept=".md,text/markdown,.pdf,application/pdf" multiple>
+          <p class="muted small">A PDF is converted to Markdown first. Scans are not supported.</p>
           <p class="muted small" id="upload-status" role="status"></p>
         </form>
       </section>
@@ -1142,7 +1283,7 @@ ${rows}
       return layout({
         title: `${note ? escapeHtml(note.name) : 'New document'} — ${assistant.name}`,
         scripts: ['/editor.js'],
-        body: `    <main class="page page--editor" data-version="${ASSET_VERSION}">
+        body: `    <main class="page page--editor" data-version="${ASSET_VERSION}" data-pdf="${base}/pdf">
       <header class="page__head">
         <div class="page__brand">
           <p class="wordmark wordmark--small">${escapeHtml(assistant.name)}</p>
@@ -1172,6 +1313,9 @@ ${rows}
 
         <div class="editor__panes">
           <div class="field editor__write">
+            <label for="pdf">Start from a PDF</label>
+            <input id="pdf" type="file" accept=".pdf,application/pdf">
+            <p class="muted small" id="pdf-status" role="status">The text is converted to Markdown for you to edit. Scans are not supported.</p>
             <label for="content">Your text (Markdown)</label>
             <textarea id="content" name="content" rows="20" required
                       maxlength="${MAX_NOTE_CHARS}" spellcheck="true"

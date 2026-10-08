@@ -15,6 +15,8 @@ const els = {
   newConversation: document.getElementById('new-conversation'),
   sidebar: document.getElementById('sidebar'),
   toggleSidebar: document.getElementById('toggle-sidebar'),
+  recording: document.getElementById('recording'),
+  recordingName: document.getElementById('recording-name'),
 };
 
 /** Label above assistant messages; set server-side from ASSISTANT_NAME. */
@@ -32,6 +34,12 @@ const apiBase = `/api/${encodeURIComponent(assistantSlug)}`;
 const assetVersion = document.querySelector('.app')?.dataset.version ?? '';
 const { renderMarkdown } = await import(`./markdown.js?v=${assetVersion}`);
 const { usageLine, totalsLine } = await import(`./format.js?v=${assetVersion}`);
+
+/*
+ * What this chatbot does, from the page. 'audio' means the composer sends a
+ * recording and the textarea is only an optional instruction.
+ */
+const accepts = document.querySelector('.app')?.dataset.accepts ?? 'text';
 
 /** Set per chatbot on its admin page; empty falls back to the sentence below. */
 const welcomeMessage =
@@ -140,6 +148,7 @@ function addMessage(role, text, options = {}) {
 
   wrapper.append(label, body);
   if (options.usage) renderUsage(wrapper, options.usage);
+  if (options.media) renderMedia(wrapper, options.media);
   els.messages.append(wrapper);
   scrollToBottom();
   return body;
@@ -188,6 +197,44 @@ function renderThinking(wrapper, text) {
     wrapper.querySelector('.message__body').before(block);
   }
   block.querySelector('.thinking__body').textContent = text;
+}
+
+/**
+ * What the model produced, under the answer: a picture it drew, or speech.
+ *
+ * Referenced by url, never inlined — the server keeps the bytes and serves them
+ * behind the same ownership check as the conversation, so a megabyte is fetched
+ * once by the browser and cached rather than carried in every reload of the
+ * conversation. The mime type decides which element it becomes; the server does
+ * not need a second field to say so.
+ */
+function renderMedia(wrapper, media) {
+  if (!media || media.length === 0) return;
+  if (wrapper.querySelector('.answer-media')) return;
+
+  const list = document.createElement('div');
+  list.className = 'answer-media';
+  for (const file of media) {
+    if ((file.mimeType ?? '').startsWith('audio/')) {
+      const player = document.createElement('audio');
+      player.className = 'answer-audio';
+      player.src = file.url;
+      player.controls = true;
+      // Never autoplay: a voice starting by itself is startling, and a browser
+      // would block it anyway without a gesture.
+      player.preload = 'metadata';
+      list.append(player);
+    } else {
+      const picture = document.createElement('img');
+      picture.className = 'answer-image';
+      picture.src = file.url;
+      picture.alt = 'Generated image';
+      picture.loading = 'lazy';
+      list.append(picture);
+    }
+  }
+  wrapper.append(list);
+  scrollToBottom();
 }
 
 /** Web pages the model consulted, listed under the answer. */
@@ -253,7 +300,10 @@ async function openConversation(id) {
     showEmptyState();
   } else {
     for (const message of data.messages) {
-      addMessage(message.role, message.content, { usage: message.usage });
+      addMessage(message.role, message.content, {
+        usage: message.usage,
+        media: message.media,
+      });
     }
   }
 
@@ -329,11 +379,48 @@ async function readEvents(response, onEvent) {
   }
 }
 
+/*
+ * The server caps the base64 at 8 MB, which is about six megabytes of file.
+ * Checked here as well so a long recording is refused before it is read into
+ * memory and sent, rather than after.
+ */
+const MAX_RECORDING_BYTES = 6 * 1024 * 1024;
+
+/** A chosen file as base64 without the data: prefix, plus its format. */
+async function readRecording(file) {
+  const buffer = await file.arrayBuffer();
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  // In chunks: btoa on one huge string blows the argument limit.
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  }
+  const extension = (file.name.split('.').pop() ?? '').toLowerCase();
+  // The server validates this too; mp4 and x-m4a both arrive as m4a in practice.
+  const format = extension === 'mp4' ? 'm4a' : extension;
+  return { data: btoa(binary), format };
+}
+
 async function sendPrompt(text) {
   if (!state.activeId) await createConversation();
 
   els.messages.querySelector('.empty-state')?.remove();
-  addMessage('user', text);
+
+  const file = accepts === 'audio' ? (els.recording?.files?.[0] ?? null) : null;
+  if (accepts === 'audio' && !file) {
+    addMessage('assistant', 'Choose a recording first.', { error: true });
+    return;
+  }
+  if (file && file.size > MAX_RECORDING_BYTES) {
+    addMessage('assistant', 'That recording is too large — about 6 MB is the limit.', {
+      error: true,
+    });
+    return;
+  }
+
+  // What the user sees of their own turn: the file they sent, plus anything
+  // they typed alongside it.
+  addMessage('user', file ? [file.name, text].filter(Boolean).join(' — ') : text);
   // A user's own message has no usage of its own; it is recorded so the running
   // total counts the same messages the screen shows.
   state.messages.push({ usage: null });
@@ -346,7 +433,10 @@ async function sendPrompt(text) {
     const response = await fetch(`${apiBase}/conversations/${state.activeId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: text }),
+      body: JSON.stringify({
+        prompt: text,
+        ...(file ? { audio: await readRecording(file) } : {}),
+      }),
     });
 
     if (response.status === 401) {
@@ -375,6 +465,8 @@ async function sendPrompt(text) {
         scrollToBottom();
       } else if (event === 'source') {
         sources.push(data);
+      } else if (event === 'media') {
+        renderMedia(answerBody.parentElement, data.media);
       } else if (event === 'done') {
         if (sources.length > 0) renderSources(answerBody.parentElement, sources);
         if (data.usage) {
@@ -395,7 +487,13 @@ async function sendPrompt(text) {
       }
     });
 
-    if (answer.length === 0 && answerBody.textContent.length === 0) {
+    /*
+     * An image model often returns a picture and no caption at all, and a
+     * speaking one returns audio — both are perfectly good answers, so
+     * "nothing came back" has to mean no text *and* nothing produced.
+     */
+    const rendered = answerBody.parentElement?.querySelector('.answer-media');
+    if (answer.length === 0 && answerBody.textContent.length === 0 && !rendered) {
       answerBody.parentElement.classList.add('message--error');
       setBody(answerBody, 'No answer received. Please try again.', { markdown: false });
     }
@@ -406,6 +504,10 @@ async function sendPrompt(text) {
     answerBody.classList.remove('typing');
     setBusy(false);
     scrollToBottom();
+    if (els.recording) {
+      els.recording.value = '';
+      if (els.recordingName) els.recordingName.textContent = '';
+    }
   }
 }
 
@@ -414,10 +516,19 @@ async function sendPrompt(text) {
 els.composer.addEventListener('submit', (event) => {
   event.preventDefault();
   const text = els.prompt.value.trim();
-  if (text.length === 0 || state.busy) return;
+  // A recording is the message for a speech-to-text chatbot, so an empty
+  // textarea is not an empty turn there.
+  const hasRecording = accepts === 'audio' && Boolean(els.recording?.files?.length);
+  if ((text.length === 0 && !hasRecording) || state.busy) return;
   els.prompt.value = '';
   els.prompt.style.height = 'auto';
   void sendPrompt(text);
+});
+
+// The file input is hidden behind a label, so the chosen name is shown by hand.
+els.recording?.addEventListener('change', () => {
+  const file = els.recording.files?.[0];
+  if (els.recordingName) els.recordingName.textContent = file ? file.name : '';
 });
 
 els.prompt.addEventListener('keydown', (event) => {

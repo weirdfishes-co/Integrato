@@ -133,6 +133,93 @@ letters, digits, `-` and `_` and must end in `.md`; 512 kB per document. A new
 assistant is seeded from the bundled files once, and existing content is never
 overwritten.
 
+**PDFs** can be uploaded too, on the knowledge base page and in a user's
+document editor. They are converted to Markdown on the server (headings,
+paragraphs, lists and simple tables are kept; running headers and page numbers
+are dropped). Limits: 10 MB and 200 pages, and no OCR — a scanned PDF has no
+text to read and is refused. Check the result: complex or multi-column layouts
+convert imperfectly.
+
+## Four types of chatbot
+
+Every chatbot has a **type**, chosen when it is created and changeable later on
+its identity page. The type decides which models it can use and which settings
+it has.
+
+| Type | What it does | Models | State |
+| --- | --- | --- | --- |
+| **Text → text** | The ordinary chatbot | ~460 | works |
+| **Text → image** | The user describes a picture, the model draws it | 12 | works |
+| **Speech → text** | The user uploads a recording, the model writes out what was said | 42 | works |
+| **Text → speech** | The user writes, the model reads it aloud | 4 | works |
+
+The model counts come from OpenRouter's own catalogue: each model declares what
+it accepts and produces, so the picker asks the catalogue rather than carrying a
+list someone has to maintain. For anything but text that filter is the
+difference between a usable picker and a wall of models that would fail on the
+first message.
+
+**Settings follow the type.** An image chatbot has no web search, memory,
+citations or compaction — all four exist to carry text between turns, which an
+image generator does not do — and gains an **image shape** instead. A
+speech-to-text chatbot has no anonymization: that rewrites outgoing *text*, and
+here the user sends audio, so offering the toggle would promise a protection
+that cannot reach the input that matters. A setting that is visible but inert is
+worse than one that is absent.
+
+**Text → speech is thin on OpenRouter.** Of the four models that output audio,
+two are music generators, leaving `openai/gpt-audio` and `gpt-audio-mini` — and
+the mini is about 27 times cheaper per audio token, so start there.
+
+### Text → image
+
+Pick a shape from the ratios OpenRouter accepts — `1:1`, `16:9`, `9:16`, `21:9`
+and ten others — or leave it on *model default*. Those are the only values the
+API takes; it refuses anything else.
+
+**`MODEL_MAX_TOKENS` applies to neither an image nor speech**, deliberately. It is an
+answer-*length* budget, and an image costs on the order of 1,300 completion
+tokens whatever it depicts — so a cap set for prose (800 is a reasonable one)
+truncates the response and returns no image and no text at all. Nothing is
+uncapped by leaving it out: one request yields one image, so the cost is bounded
+by the request rather than by a token count.
+
+An image arrives whole rather than streamed, which is why there is no typing
+indicator for this type: half a picture is not worth showing. It is stored
+beside the message and served from its own address behind the same ownership
+check as the conversation, so a megabyte of PNG is fetched once and cached
+rather than carried in every reload of the conversation.
+
+Images are **never sent back to the model**. The history replay is text only, so
+a picture costs its tokens once.
+
+### Text → speech
+
+Pick a **voice** — `alloy`, `nova`, `onyx`, `shimmer` and seven others — or leave
+it on *model default*. The catalogue does not publish voices, so the list is
+maintained here; the provider refuses a name it does not have rather than
+ignoring it, so a wrong one surfaces as an error instead of silence.
+
+The answer arrives as text *and* a player under it. Nothing autoplays: a voice
+starting by itself is startling, and a browser would block it anyway.
+
+Two constraints come from the API rather than from choice. Audio **must** be
+streamed — ask for it without streaming and the reply is "Audio output requires
+stream: true" — and while streaming the only format available is raw `pcm16`,
+because a container cannot be written incrementally. The samples are therefore
+wrapped into a 24 kHz mono WAV by the app before they are stored.
+
+### Speech → text
+
+The composer gains a **Choose a recording** control. Upload `.wav`, `.mp3`,
+`.m4a`, `.ogg`, `.flac` or `.webm` up to about 6 MB — a few minutes of speech —
+and the answer is the transcript. Anything typed alongside the file is sent as
+an instruction, so "translate this into Dutch" works as well as a plain
+transcription.
+
+The recording itself is not stored: the conversation keeps the file name and the
+transcript, which is what anyone rereading it needs.
+
 ## Settings, per assistant
 
 Stored in the database, so a change applies from the next message — no restart.
@@ -143,6 +230,8 @@ Stored in the database, so a change applies from the next message — no restart
 | **Identity** | Name, address, description, answer language, welcome message |
 | **Reasoning effort** | `low` … `max`; models without reasoning ignore it |
 | **Show thinking** | Streams the reasoning above the answer, collapsed |
+| **Image shape** | *Text → image only.* The aspect ratio asked of the model |
+| **Voice** | *Text → speech only.* Which voice reads the answer aloud |
 | **Temperature / Top-P** | Empty — the default — sends nothing, so the model uses the one its provider tuned. Several reasoning models reject a temperature outright. Applies to answers only, never to memory or compaction |
 | **Web search** | Look things up beyond the knowledge base. Billed per search (~$0.007), whatever the model costs |
 | **Domain limits** | One domain per line, wildcards allowed. Some engines accept only one of the two lists, so "only these" wins when both are filled in |

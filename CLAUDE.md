@@ -46,6 +46,8 @@ src/
   assistants.ts      slugs, per-assistant paths, first-run migration
   balance.ts         OpenRouter credit + key-limit status for /admin
   anonymize.ts       masks personal data in user text, in-process
+  kinds.ts           the four chatbot types: what each accepts, produces, shows
+  pdf.ts             PDF to Markdown (pdf.js + layout heuristics), in-process
   notes.ts           the user's own documents: validation + prompt section
   memory.ts          cross-conversation memory: extraction + prompt section
   compaction.ts      summarizes old turns once a conversation gets long
@@ -53,10 +55,13 @@ src/
   context.ts         builds the system prompt from instr.md + context/*.md
   mail.ts            magic-link delivery over Brevo's or Mailjet's HTTP API, or the log
   crypto.ts          AES-256-GCM + HMAC blind index for stored email addresses
+  security.ts        CSP and the other headers, plus the origin guard
   logger.ts          pino instance shared by every module
-  rate-limit.ts      in-memory limiter for the login form
+  rate-limit.ts      in-memory limiter: the login form, and chat messages
   views.ts           server-side HTML (everything through escapeHtml)
-  routes/            auth.ts, chat.ts, admin.ts, content.ts, notes.ts
+  routes/            auth.ts, chat.ts, admin.ts, content.ts, notes.ts,
+                     conversations.ts (the admin-readable log), pdf.ts
+    pdf.ts           shared PDF-to-Markdown endpoint logic (convert only, stores nothing)
     access.ts        resolves :slug against the rights matrix, shared
   db/
     index.ts         connection + migrations (in-process at boot)
@@ -70,10 +75,14 @@ public/fonts/        Montserrat + Lato, self-hosted — no CDN font request
 STYLE.md             styleguide of record; public/styles.css implements it
 scripts/build.mjs    esbuild bundle to dist/ + copy migrations
 scripts/entrypoint.sh  takes ownership of /data, then drops to the node user
-tests/               vitest: auth, content, context, settings, features
-                     (memory + compaction), views, mail, assistants
-                     (slugs, rights matrix, isolation), privacy
-                     (anonymization + EU routing), markdown, usage, notes
+tests/               vitest, one file per concern. auth, crypto (email
+                     encryption), content, context, settings, assistants
+                     (slugs, rights matrix, isolation), features (memory +
+                     compaction), privacy (anonymization + EU routing),
+                     notes (users' own documents), kinds (the four types),
+                     media (image and speech requests), pdf, usage (tokens
+                     and cost), markdown, views, styles (the stylesheet
+                     parses), security (headers + origin guard), mail, llm
 instr.md             system prompt — the user owns its content
 instr.example.md     neutral starting prompt, safe to copy over instr.md
 context/*.md         knowledge base seeded into a brand-new assistant
@@ -256,6 +265,21 @@ context/*.md         knowledge base seeded into a brand-new assistant
   different thing with a different owner — one user, one chatbot — so they are
   `notes` in the table, the repo and `notes.ts`, and "My documents" in the
   interface. Keep new user-facing text on documents and the identifiers on notes.
+- **PDFs are converted in-process with pdf.js, not with Microsoft's markitdown.**
+  markitdown is Python (a second runtime, the same objection that removed
+  Presidio), and its PDF path is pdfminer text with no heading detection.
+  `pdf.ts` reads glyphs with position and font size and rebuilds structure:
+  headings from size rank, paragraphs un-wrapped and de-hyphenated, bullets,
+  tables from shared column positions, and headers/footers/page numbers dropped
+  when they repeat on most pages. `itemsToMarkdown` is pure so the rules are
+  tested without a PDF. **No OCR**: a scan has no text layer and is refused with
+  that explanation; multi-column pages read in file order. The conversion route
+  (`routes/pdf.ts`) only converts; the browser then saves through the path that
+  already existed (`/upload` for the knowledge base, the editor textarea for a
+  user), so the rules about who may write where are not duplicated. It takes
+  the raw PDF body (`application/pdf`, 10 MB, 200 pages) and the user route is
+  rate-limited, since parsing costs CPU. Heuristics are a net, not a classifier:
+  expect to tune them against real documents.
 - **A user's documents live in the database, not on the volume.** The
   per-assistant directories under `ASSISTANTS_DIR` are shared by every user of
   that chatbot, which is the wrong boundary: these reach nobody but their
@@ -339,6 +363,69 @@ context/*.md         knowledge base seeded into a brand-new assistant
   at `MAX_NOTES_PER_USER` per chatbot — the prompt budget already bounds what is
   *sent*, but nothing bounded what is *stored*. Both limiters are in memory, so
   they are per process and reset on restart; shared limits would need Postgres.
+- **A chatbot has a kind, and `kinds.ts` is the only place that knows what it
+  means.** Four of them — text, image, transcribe, speech — on the `assistants`
+  row, because the kind decides which *settings* exist and a value that governs
+  the others is identity rather than one of them. Three places have to agree
+  about it and they are far apart: the admin form (which fields to render), the
+  model picker (which models can do it) and `llm.ts` (what to put in the
+  request), so each asks `kindSpec`/`kindHasSetting` rather than carrying its
+  own list of exceptions. **A new kind is a row in `KINDS` first**; the form and
+  the filter follow from it. `ready: false` is how a kind appears in the chooser
+  while the chat cannot serve it — the admin page says so rather than letting
+  someone configure a chatbot that silently answers as text.
+- **Which models a kind may use is the catalogue's answer, not ours.** Every
+  model declares `architecture.input_modalities` and `output_modalities`, so
+  `modelsForKind` filters on what the kind accepts and produces. Of 468 models,
+  12 output an image and 4 output audio, and those sets change weekly — a list
+  of ids would be stale within a month. Filtering also *is* the safety: offering
+  a text model to an image chatbot yields one that fails on its first message.
+- **Speech is the mirror image of the image path.** It *must* stream — the API
+  answers "Audio output requires stream: true" otherwise — where an image must
+  not, and the only format available while streaming is bare `pcm16`, because a
+  container cannot be written incrementally. So `pcmToWav` writes the 44-byte
+  RIFF header itself, at **24 kHz mono 16-bit**. That rate is not a guess: audio
+  generated at it, wrapped by this code, was handed to a *different* model for
+  transcription and came back word for word — a wrong rate would have shifted
+  the pitch and garbled it. `tests/media.test.ts` asserts the header's bytes,
+  because a wrong data length makes some players refuse the file outright.
+  The words arrive twice over, as `delta.content` and as
+  `delta.audio.transcript`; gpt-audio sends only the transcript, so the answer
+  falls back to it or the conversation stores a blank beside the sound.
+  Voices are **ours to list**: `supported_voices` is null on every speaking
+  model, so `VOICES` was checked by hand, and the provider refuses an unknown
+  name rather than ignoring it.
+- **`MODEL_MAX_TOKENS` is not sent on an image or a speech request.** It is an
+  answer-length budget and an image costs ~1,300 completion tokens whatever it
+  depicts, so a cap chosen for prose truncates it: `finish_reason: "length"`, no image, no
+  text, and an error the user cannot act on. Found in the field with
+  `MODEL_MAX_TOKENS=800`. Leaving it out caps nothing that matters — one request
+  yields one image — and `tests/image.test.ts` asserts the body carries no
+  `max_tokens`. The empty-response branch now names its own cause (cut off /
+  declined / neither), the same rule `describeChatError` follows.
+  Several image models return a picture and **no caption**; that is an answer,
+  so "nothing came back" means no text *and* no image, in `llm.ts` and in
+  `app.js` both.
+- **Generated media is fetched once and never replayed.** An image arrives as a
+  data: URL of about a megabyte on `message.images`; speech arrives as pcm
+  chunks. Both are stored as BYTEA in **`message_media`** — one table, because
+  the mime type already says which it is and the route that serves them does
+  not care — the volume is shared by everyone who may use a
+  chatbot, which is the wrong boundary, the same argument as for a user's own
+  documents — and served from `/<slug>/images/<id>` behind
+  `findImageForUser`, whose join *is* the ownership check. The conversation
+  payload carries urls, never bytes, or reopening a thread would be a dozen
+  megabytes of JSON. The history replay reads `messages.content` only, so an
+  image costs its tokens once. The image path is **non-streaming**: an image
+  arrives whole, so a stream would buy a spinner and an extra failure mode.
+- **A recording rides on the turn, and `toMessage` is the only thing that knows
+  it.** A text turn stays a plain string — the prompt cache needs the prefix
+  byte-identical between requests — and only a turn carrying audio becomes the
+  content-part array. This was got wrong once in a way nothing caught: the
+  streaming request builder rebuilt each turn from `role` and `content` alone,
+  dropped the recording, and the model answered "there is nothing to
+  transcribe". Everything still compiled. `protect()` had the same shape and now
+  spreads the turn, and `tests/kinds.test.ts` pins `toMessage`.
 - **Memory goes after the knowledge base in the system prompt**, never before.
   The knowledge base is the cached prefix shared by every user; putting a
   per-user block in front of it would invalidate the cache for everyone on every
@@ -490,7 +577,9 @@ Per-assistant settings (the `assistant_settings` table, `settings.ts`, saved on
 (≤ 20, default 5), `web_search_include_domains` / `_exclude_domains`, `memory`,
 `citations`, `compaction`, `notes` (users' own documents), `eu_only`,
 `anonymize`, `admin_conversation_log`, `temperature`, `top_p` (the last two
-empty = send nothing). Identity lives on the `assistants` row instead: `name`,
+empty = send nothing), `aspect_ratio` (image chatbots; empty = the model
+chooses), `voice` (speaking chatbots; empty = the model's own). Which of these the form shows depends on the chatbot's `kind` —
+see `kinds.ts`. Identity lives on the `assistants` row instead: `name`,
 `slug`, `description`, `language`, `welcome`. A new key needs its entry in
 `KEYS`, `loadSettings`, `saveSettings`, the form in `views.ts`, the route in
 `routes/admin.ts`, and a row in the README table.

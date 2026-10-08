@@ -1,5 +1,6 @@
 import type { Db } from './index.js';
 import { normalizeEmail } from '../config.js';
+import { isAssistantKind, DEFAULT_KIND, type AssistantKind } from '../kinds.js';
 import type { Cipher } from '../crypto.js';
 
 /**
@@ -24,6 +25,8 @@ export interface Assistant {
   slug: string;
   name: string;
   description: string;
+  /** What it does: text, image, transcribe, speech. See kinds.ts. */
+  kind: AssistantKind;
   language: string;
   /** Greeting for an empty conversation; empty means use the built-in one. */
   welcome: string;
@@ -92,6 +95,14 @@ export interface Note {
   updatedAt: string;
 }
 
+/** Something a model produced — an image or audio — described without its bytes. */
+export interface MessageMedia {
+  id: number;
+  messageId: number;
+  mimeType: string;
+  byteLength: number;
+}
+
 export interface MessageUsage {
   promptTokens: number;
   completionTokens: number;
@@ -129,6 +140,7 @@ interface AssistantRow {
   slug: string;
   name: string;
   description: string;
+  kind: string;
   language: string;
   welcome: string;
   created_at: string;
@@ -165,6 +177,13 @@ interface MemoryRow {
   assistant_id: number;
   content: string;
   created_at: string;
+}
+
+interface MessageMediaRow {
+  id: number;
+  message_id: number;
+  mime_type: string;
+  byte_length: string | number;
 }
 
 interface NoteRow {
@@ -222,6 +241,9 @@ function toAssistant(row: AssistantRow): Assistant {
     slug: row.slug,
     name: row.name,
     description: row.description,
+    // A row written before 007, or by something that bypassed the check
+    // constraint, still has to produce a usable chatbot.
+    kind: isAssistantKind(row.kind) ? row.kind : DEFAULT_KIND,
     language: row.language,
     welcome: row.welcome,
     createdAt: requireTime(row.created_at),
@@ -263,6 +285,16 @@ function toMemory(row: MemoryRow): Memory {
     assistantId: row.assistant_id,
     content: row.content,
     createdAt: requireTime(row.created_at),
+  };
+}
+
+function toMessageMedia(row: MessageMediaRow): MessageMedia {
+  return {
+    id: row.id,
+    messageId: row.message_id,
+    mimeType: row.mime_type,
+    // octet_length comes back as a string, like every other bigint-ish value.
+    byteLength: Number(row.byte_length),
   };
 }
 
@@ -607,11 +639,12 @@ export function createRepo(db: Db, cipher: Cipher) {
       name: string,
       description: string,
       language: string,
+      kind: AssistantKind = DEFAULT_KIND,
     ): Promise<Assistant> {
       const row = await db.one<AssistantRow>(
-        `INSERT INTO assistants (slug, name, description, language) VALUES ($1, $2, $3, $4)
+        `INSERT INTO assistants (slug, name, description, language, kind) VALUES ($1, $2, $3, $4, $5)
          RETURNING *`,
-        [slug, name, description, language],
+        [slug, name, description, language, kind],
       );
       if (!row) throw new Error(`Could not create assistant ${slug}`);
       return toAssistant(row);
@@ -623,10 +656,13 @@ export function createRepo(db: Db, cipher: Cipher) {
       description: string,
       language: string,
       welcome: string,
+      kind: AssistantKind,
     ): Promise<void> {
       await db.run(
-        'UPDATE assistants SET name = $1, description = $2, language = $3, welcome = $4 WHERE id = $5',
-        [name, description, language, welcome, id],
+        `UPDATE assistants
+         SET name = $1, description = $2, language = $3, welcome = $4, kind = $5
+         WHERE id = $6`,
+        [name, description, language, welcome, kind, id],
       );
     },
 
@@ -765,6 +801,60 @@ export function createRepo(db: Db, cipher: Cipher) {
         userId,
         assistantId,
       ]);
+    },
+
+    // ---- generated images --------------------------------------------------
+
+    /**
+     * Stores one piece of media against the message that produced it.
+     *
+     * Bytes, not the base64 the API returns — a third smaller, and it means the
+     * route that serves it can set a real Content-Type instead of handing a
+     * browser a string to parse. The mime type is the only thing that
+     * distinguishes a picture from a recording here.
+     */
+    async addMessageMedia(messageId: number, mimeType: string, bytes: Buffer): Promise<MessageMedia> {
+      const row = await db.one<MessageMediaRow>(
+        `INSERT INTO message_media (message_id, mime_type, bytes) VALUES ($1, $2, $3)
+         RETURNING id, message_id, mime_type, octet_length(bytes) AS byte_length`,
+        [messageId, mimeType, bytes],
+      );
+      if (!row) throw new Error('Could not store the media');
+      return toMessageMedia(row);
+    },
+
+    /** The media of one conversation, without the bytes. */
+    async listMediaForConversation(conversationId: number): Promise<MessageMedia[]> {
+      const rows = await db.all<MessageMediaRow>(
+        `SELECT i.id, i.message_id, i.mime_type, octet_length(i.bytes) AS byte_length
+         FROM message_media i
+         JOIN messages m ON m.id = i.message_id
+         WHERE m.conversation_id = $1
+         ORDER BY i.id`,
+        [conversationId],
+      );
+      return rows.map(toMessageMedia);
+    },
+
+    /**
+     * One file with its bytes, for the route that serves it — and only if it
+     * belongs to this user. The ownership is the join, not a check afterwards,
+     * the same rule the conversation queries follow.
+     */
+    async findMediaForUser(
+      imageId: number,
+      userId: number,
+      assistantId: number,
+    ): Promise<{ mimeType: string; bytes: Buffer } | null> {
+      const row = await db.one<{ mime_type: string; bytes: Buffer }>(
+        `SELECT i.mime_type, i.bytes
+         FROM message_media i
+         JOIN messages m ON m.id = i.message_id
+         JOIN conversations c ON c.id = m.conversation_id
+         WHERE i.id = $1 AND c.user_id = $2 AND c.assistant_id = $3`,
+        [imageId, userId, assistantId],
+      );
+      return row ? { mimeType: row.mime_type, bytes: row.bytes } : null;
     },
 
     // ---- notes (the user's own documents) ----------------------------------

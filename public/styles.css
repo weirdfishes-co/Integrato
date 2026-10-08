@@ -1731,3 +1731,79 @@ input[type='file'] {
   color: var(--text-muted);
   white-space: nowrap;
 }
+
+/* ---------- generated images, and the recording picker ---------- */
+
+/*
+ * What an answer produced. Pictures sit at the width of the message column, so
+ * a 16:9 and a 9:16 both stay inside the reading measure rather than deciding
+ * the layout for themselves; a player takes the same width.
+ */
+.answer-media {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.answer-audio {
+  width: 100%;
+}
+
+.answer-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 70vh;
+  object-fit: contain;
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+}
+
+/*
+ * The file input itself is hidden: a browser's own rendering of it cannot be
+ * styled to sit beside the composer's field, and the label is a perfectly good
+ * button. Hidden by clipping rather than display:none, so it keeps its place in
+ * the focus order and a keyboard can still reach it.
+ */
+.composer__attach {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  flex: none;
+  max-width: 11rem;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  line-height: 1.1rem;
+  color: var(--link);
+  font-weight: 700;
+}
+
+.composer__attach input[type='file'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.composer__attach:hover .composer__attach-label,
+.composer__attach input[type='file']:focus-visible ~ .composer__attach-label {
+  text-decoration: underline;
+}
+
+/* The chosen file, which can easily be longer than the control. */
+.composer__attach-name {
+  font-weight: 400;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .composer__attach {
+    max-width: 7rem;
+  }
+}

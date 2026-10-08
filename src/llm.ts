@@ -2,9 +2,10 @@ import OpenAI from 'openai';
 
 import { anonymizeBatch } from './anonymize.js';
 import type { Config, Effort } from './config.js';
+import type { AssistantKind } from './kinds.js';
 import type { MessageUsage, Role } from './db/repo.js';
 import { logger } from './logger.js';
-import { euProviderTags } from './models.js';
+import { euProviderTags, isTranscriptionModel } from './models.js';
 import type { AssistantSettings } from './settings.js';
 
 /**
@@ -24,6 +25,18 @@ const BASE_URL = 'https://openrouter.ai/api/v1';
 export interface ChatTurn {
   role: Role;
   content: string;
+  /**
+   * A recording, for a speech-to-text chatbot. Base64 without the data: prefix,
+   * and a format the provider recognises ('wav', 'mp3', …) — the provider
+   * validates it, OpenRouter passes it through.
+   */
+  audio?: { data: string; format: string };
+}
+
+/** Something a model produced: a picture it drew, or speech it spoke. */
+export interface GeneratedMedia {
+  mimeType: string;
+  bytes: Buffer;
 }
 
 /** A web page the model consulted, surfaced to the user under the answer. */
@@ -36,6 +49,8 @@ export interface ChatRequest {
   systemPrompt: string;
   history: readonly ChatTurn[];
   settings: AssistantSettings;
+  /** Decides the request shape and what comes back. See kinds.ts. */
+  kind: AssistantKind;
   signal?: AbortSignal;
 }
 
@@ -49,6 +64,8 @@ export interface ChatEvents {
 export interface ChatResult {
   answer: string;
   sources: SourceLink[];
+  /** Non-empty for a text-to-image or text-to-speech chatbot. */
+  media: GeneratedMedia[];
   /**
    * What the answer consumed, as the provider reported it — null when the
    * stream ended without a usage chunk, which some providers do.
@@ -101,7 +118,9 @@ export function describeChatError(error: unknown): string {
   switch (status) {
     case 401:
     case 403:
-      return 'The OpenRouter key was rejected. An administrator needs to check it.';
+      // Reached only after the retries in withAuthRetry, so it is persistent.
+      // The user cannot fix a key; say so, and keep the admin's hint short.
+      return 'The model service did not accept the request, even after retrying. Please come back in a few minutes; if it keeps happening, tell an administrator to check the OpenRouter key.';
     case 402:
       return 'The OpenRouter account has too little credit for this request. An administrator needs to add credit, or lower MODEL_MAX_TOKENS.';
     case 404:
@@ -117,6 +136,80 @@ export function describeChatError(error: unknown): string {
     default:
       return 'Something went wrong while fetching the answer. Please try again.';
   }
+}
+
+const AUTH_RETRY_DELAYS_MS = [1000, 3000];
+
+/**
+ * Retries a request that OpenRouter answered with 401, twice more.
+ *
+ * The SDK already retries 408, 409, 429 and 5xx, but never 401, and OpenRouter
+ * does now and then answer a good key with one under load. It wraps only the
+ * call that opens the request: a 401 arrives before any text, so a retry cannot
+ * duplicate output. An error in the middle of a stream is not retried.
+ * Every attempt is logged with the provider's own message, which is the only
+ * way to tell a flaky 401 from a genuinely dead key.
+ */
+export async function withAuthRetry<T>(
+  call: () => Promise<T>,
+  signal?: AbortSignal,
+  delays: readonly number[] = AUTH_RETRY_DELAYS_MS,
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await call();
+    } catch (error) {
+      const isAuth = error instanceof OpenAI.APIError && error.status === 401;
+      if (!isAuth || attempt >= delays.length || signal?.aborted) throw error;
+      logger.warn(
+        { attempt: attempt + 1, status: 401, providerMessage: error.message },
+        'OpenRouter answered 401, retrying',
+      );
+      await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+    }
+  }
+}
+
+/**
+ * A dedicated transcriber (AssemblyAI, Fish Audio, Whisper, …) is not reached
+ * through chat completions: it has its own endpoint, which takes the recording
+ * and answers with the text and what it cost. The error is shaped like the
+ * SDK's, so the retry and `describeChatError` treat it like any other.
+ */
+async function transcribe(
+  config: Config,
+  model: string,
+  audio: { data: string; format: string },
+  provider: ProviderPreferences | undefined,
+  signal?: AbortSignal,
+): Promise<{ text: string; cost: number | null }> {
+  const response = await fetch(`${BASE_URL}/audio/transcriptions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${config.openRouterApiKey}`,
+      'Content-Type': 'application/json',
+      ...(config.siteUrl ? { 'HTTP-Referer': config.siteUrl } : {}),
+      'X-Title': config.siteName,
+    },
+    body: JSON.stringify({
+      model,
+      input_audio: { data: audio.data, format: audio.format },
+      ...(provider ? { provider } : {}),
+    }),
+    signal,
+  });
+
+  const body = (await response.json().catch(() => ({}))) as {
+    text?: unknown;
+    usage?: { cost?: unknown };
+  };
+  if (!response.ok) {
+    throw new OpenAI.APIError(response.status, body, undefined, response.headers);
+  }
+  return {
+    text: typeof body.text === 'string' ? body.text : '',
+    cost: typeof body.usage?.cost === 'number' ? body.usage.cost : null,
+  };
 }
 
 interface ReasoningConfig {
@@ -169,9 +262,44 @@ interface OpenRouterParams extends OpenAI.ChatCompletionCreateParamsStreaming {
   usage?: { include: true };
 }
 
-interface OpenRouterCompletionParams extends OpenAI.ChatCompletionCreateParamsNonStreaming {
+/*
+ * `modalities` is omitted from the SDK's own type and redeclared: the SDK knows
+ * only "text" and "audio", while OpenRouter also takes "image". Narrowing to
+ * the SDK's union would make the one value this feature needs unspellable.
+ */
+interface OpenRouterCompletionParams
+  extends Omit<OpenAI.ChatCompletionCreateParamsNonStreaming, 'modalities'> {
   reasoning?: ReasoningConfig;
   provider?: ProviderPreferences;
+  /** Which outputs to ask for; an image model needs this to draw anything. */
+  modalities?: string[];
+  image_config?: { aspect_ratio?: string };
+  usage?: { include: true };
+}
+
+interface OpenRouterStreamingParams
+  extends Omit<OpenAI.ChatCompletionCreateParamsStreaming, 'modalities' | 'audio'> {
+  modalities?: string[];
+  audio?: { voice?: string; format: string };
+  provider?: ProviderPreferences;
+  usage?: { include: true };
+}
+
+/**
+ * Where a generated image arrives: on the message, not in the content, as a
+ * data: URL of about a megabyte.
+ */
+interface OpenRouterImage {
+  type?: string;
+  image_url?: { url?: string };
+}
+
+/** `data:image/png;base64,…` into something storable. */
+function decodeImage(url: unknown): GeneratedMedia | null {
+  if (typeof url !== 'string') return null;
+  const match = /^data:([\w/+.-]+);base64,(.+)$/s.exec(url);
+  if (!match?.[1] || !match[2]) return null;
+  return { mimeType: match[1], bytes: Buffer.from(match[2], 'base64') };
 }
 
 interface ProviderPreferences {
@@ -183,6 +311,8 @@ interface ProviderPreferences {
 /** Reasoning text and search annotations ride along on the standard delta. */
 interface OpenRouterDelta {
   content?: string | null;
+  /** Spoken output: base64 pcm16 in `data`, the words in `transcript`. */
+  audio?: { data?: string; transcript?: string };
   reasoning?: string | null;
   reasoning_details?: { type?: string; text?: string }[];
   annotations?: {
@@ -260,6 +390,57 @@ function reasoningText(delta: OpenRouterDelta): string {
     .join('');
 }
 
+/**
+ * One turn as the API wants it. Plain text stays a plain string — the cached
+ * prompt prefix depends on the shape being stable — and only a turn carrying a
+ * recording becomes the content-part array.
+ */
+/**
+ * Raw PCM into a playable file.
+ *
+ * Streamed audio arrives as `pcm16` and nothing else — mp3 and wav are refused
+ * with "Audio output requires stream: true"'s sibling error, because a
+ * container cannot be written incrementally. So the samples come back bare and
+ * the 44-byte RIFF header is written here.
+ *
+ * 24 kHz, mono, 16-bit is what these models produce. The figure is not a guess:
+ * speech generated at this rate, wrapped with this header, was handed to a
+ * different model for transcription and came back word for word — a wrong rate
+ * would have shifted the pitch and garbled it.
+ */
+const PCM_SAMPLE_RATE = 24_000;
+
+function pcmToWav(pcm: Buffer): GeneratedMedia {
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16); // the size of this fmt chunk
+  header.writeUInt16LE(1, 20); // 1 = uncompressed PCM
+  header.writeUInt16LE(1, 22); // mono
+  header.writeUInt32LE(PCM_SAMPLE_RATE, 24);
+  header.writeUInt32LE(PCM_SAMPLE_RATE * 2, 28); // bytes per second
+  header.writeUInt16LE(2, 32); // bytes per sample frame
+  header.writeUInt16LE(16, 34); // bits per sample
+  header.write('data', 36);
+  header.writeUInt32LE(pcm.length, 40);
+  return { mimeType: 'audio/wav', bytes: Buffer.concat([header, pcm]) };
+}
+
+export function toMessage(turn: ChatTurn): OpenAI.ChatCompletionMessageParam {
+  if (!turn.audio) {
+    return { role: turn.role, content: turn.content } as OpenAI.ChatCompletionMessageParam;
+  }
+  return {
+    role: 'user',
+    content: [
+      { type: 'text', text: turn.content },
+      { type: 'input_audio', input_audio: { data: turn.audio.data, format: turn.audio.format } },
+    ],
+  } as unknown as OpenAI.ChatCompletionMessageParam;
+}
+
 export function createChatClient(config: Config): ChatClient {
   /**
    * The user's own words, pseudonymized when the chatbot asks for it. Only user
@@ -278,7 +459,11 @@ export function createChatClient(config: Config): ChatClient {
 
     const result = [...turns];
     indexes.forEach((index, position) => {
-      result[index] = { role: 'user', content: cleaned[position] ?? turns[index]!.content };
+      result[index] = {
+        ...turns[index]!,
+        role: 'user',
+        content: cleaned[position] ?? turns[index]!.content,
+      };
     });
     return result;
   }
@@ -294,9 +479,187 @@ export function createChatClient(config: Config): ChatClient {
   });
 
   return {
-    async stream({ systemPrompt, history, settings, signal }, events) {
+    async stream({ systemPrompt, history, settings, kind, signal }, events) {
       const turns = protect(settings, history);
       const provider = await providerPreferences(settings);
+
+      /*
+       * A dedicated transcriber answers in one piece from another endpoint.
+       * The recording is read from `history`, not `turns`: anonymization
+       * rewrites text turns and would not carry it along.
+       */
+      if (kind === 'transcribe' && (await isTranscriptionModel(settings.model))) {
+        const audio = [...history].reverse().find((turn) => turn.audio)?.audio;
+        if (!audio) throw new ChatRefusalError('There is no recording to transcribe.');
+
+        const { text, cost } = await withAuthRetry(
+          () => transcribe(config, settings.model, audio, provider, signal),
+          signal,
+        );
+        if (text.trim().length === 0) {
+          throw new ChatRefusalError('No speech was found in that recording.');
+        }
+        events.onDelta(text);
+        // Billed per second of audio, so there are no tokens to report — only
+        // the cost, which is the figure that matters on the usage panel.
+        const usage: MessageUsage | null =
+          cost === null
+            ? null
+            : { promptTokens: 0, completionTokens: 0, reasoningTokens: 0, cachedTokens: 0, cost };
+        return { answer: text, sources: [], media: [], usage };
+      }
+
+      /*
+       * An image is not worth streaming: it arrives whole, in one chunk at the
+       * end, so a stream would buy a spinner and an extra failure mode. One
+       * non-streaming call, and the text that accompanies it is handed to the
+       * same onDelta the text chatbots use — so the route and the front end do
+       * not need to know which kind they are serving.
+       */
+      if (kind === 'image') {
+        /*
+         * Deliberately no max_tokens. MODEL_MAX_TOKENS is an answer-*length*
+         * budget, which is the wrong instrument here: an image costs on the
+         * order of 1,300 completion tokens whatever it depicts, so a cap set
+         * for prose — 800 is a perfectly sensible one — truncates the response
+         * and returns finish_reason "length" with no image and no text at all.
+         * Nothing is uncapped by leaving it out: a request yields one image, so
+         * its cost is bounded by the request rather than by a token count.
+         */
+        const params: OpenRouterCompletionParams = {
+          model: settings.model,
+          modalities: ['image', 'text'],
+          ...(settings.aspectRatio ? { image_config: { aspect_ratio: settings.aspectRatio } } : {}),
+          usage: { include: true },
+          // No sampling: the admin form hides it for this kind, so a value
+          // saved before the kind was switched must not be sent either.
+          ...(provider ? { provider } : {}),
+          messages: [
+            { role: 'system', content: systemPrompt },
+            ...turns.map(toMessage),
+          ],
+        };
+
+        const response = await withAuthRetry(
+          () =>
+            client.chat.completions.create(
+              params as unknown as OpenAI.ChatCompletionCreateParamsNonStreaming,
+              { signal },
+            ),
+          signal,
+        );
+        const message = response.choices[0]?.message as
+          | { content?: string | null; images?: OpenRouterImage[] }
+          | undefined;
+
+        const answer = message?.content ?? '';
+        if (answer.length > 0) events.onDelta(answer);
+
+        const images = (message?.images ?? [])
+          .map((image) => decodeImage(image.image_url?.url))
+          .filter((image): image is GeneratedMedia => image !== null);
+
+        /*
+         * An empty response is not self-explanatory, and the two ways of
+         * getting one need different fixes, so they get different sentences.
+         * This is exactly the rule describeChatError follows for the provider's
+         * status codes.
+         */
+        if (images.length === 0 && answer.trim().length === 0) {
+          const reason = response.choices[0]?.finish_reason;
+          if (reason === 'length') {
+            throw new ChatRefusalError(
+              'The model ran out of room before it finished the image. An administrator needs to raise MODEL_MAX_TOKENS, or leave it unset.',
+            );
+          }
+          if (reason === 'content_filter') {
+            throw new ChatRefusalError('The model declined to draw this.');
+          }
+          throw new ChatRefusalError('The model returned neither an image nor an explanation.');
+        }
+
+        return {
+          answer,
+          sources: [],
+          media: images,
+          usage: toUsage((response as { usage?: OpenRouterUsage }).usage),
+        };
+      }
+
+      /*
+       * Speech is the mirror image of the image path: it *must* be streamed —
+       * the API answers "Audio output requires stream: true" otherwise — and
+       * the only format available while streaming is bare `pcm16`, because a
+       * container cannot be written incrementally. So the samples are gathered
+       * and wrapped into a WAV at the end.
+       *
+       * Also no max_tokens, for the reason the image path has none: a cap set
+       * for prose truncates generated media, and here it would cut the sentence
+       * off mid-word. The length of what is spoken follows the text, which the
+       * system prompt governs.
+       */
+      if (kind === 'speech') {
+        const params: OpenRouterStreamingParams = {
+          model: settings.model,
+          stream: true,
+          modalities: ['text', 'audio'],
+          audio: { ...(settings.voice ? { voice: settings.voice } : {}), format: 'pcm16' },
+          stream_options: { include_usage: true },
+          usage: { include: true },
+          ...sampling(settings),
+          ...(provider ? { provider } : {}),
+          messages: [
+            { role: 'system', content: systemPrompt },
+            ...turns.map(toMessage),
+          ],
+        };
+
+        const stream = await client.chat.completions.create(
+          params as unknown as OpenAI.ChatCompletionCreateParamsStreaming,
+          { signal },
+        );
+
+        const samples: Buffer[] = [];
+        let spoken = '';
+        let said = '';
+        let usage: MessageUsage | null = null;
+        let refused = false;
+
+        for await (const chunk of stream) {
+          usage = toUsage((chunk as { usage?: OpenRouterUsage }).usage) ?? usage;
+          const choice = chunk.choices[0];
+          if (choice?.finish_reason === 'content_filter') refused = true;
+
+          const delta = choice?.delta as OpenRouterDelta | undefined;
+          if (!delta) continue;
+
+          if (typeof delta.content === 'string' && delta.content.length > 0) {
+            said += delta.content;
+            events.onDelta(delta.content);
+          }
+          /*
+           * The words arrive twice over: as ordinary content, and as the
+           * transcript of what is being spoken. Whichever turns up is what the
+           * conversation shows — gpt-audio sends only the transcript.
+           */
+          if (delta.audio?.transcript) spoken += delta.audio.transcript;
+          if (delta.audio?.data) samples.push(Buffer.from(delta.audio.data, 'base64'));
+        }
+
+        const answer = said.length > 0 ? said : spoken;
+        if (samples.length === 0) {
+          if (refused) throw new ChatRefusalError('The model declined to read this out.');
+          throw new ChatRefusalError(
+            answer.trim().length > 0
+              ? 'The model answered in text but produced no audio.'
+              : 'The model produced no audio and no text.',
+          );
+        }
+
+        if (spoken.length > 0 && said.length === 0) events.onDelta(spoken);
+
+        return { answer, sources: [], media: [pcmToWav(Buffer.concat(samples))], usage };
+      }
 
       const params: OpenRouterParams = {
         model: settings.model,
@@ -314,11 +677,14 @@ export function createChatClient(config: Config): ChatClient {
         ...(provider ? { provider } : {}),
         messages: [
           { role: 'system', content: systemPrompt },
-          ...turns.map((turn) => ({ role: turn.role, content: turn.content })),
+          ...turns.map(toMessage),
         ],
       };
 
-      const stream = await client.chat.completions.create(params, { signal });
+      const stream = await withAuthRetry(
+        () => client.chat.completions.create(params, { signal }),
+        signal,
+      );
 
       let answer = '';
       let refused = false;
@@ -365,7 +731,7 @@ export function createChatClient(config: Config): ChatClient {
         throw new ChatRefusalError('The model declined to answer this request.');
       }
 
-      return { answer, sources, usage };
+      return { answer, sources, media: [], usage };
     },
 
     async complete({ settings, system, user, maxTokens }) {
@@ -387,7 +753,11 @@ export function createChatClient(config: Config): ChatClient {
         ],
       };
 
-      const response = await client.chat.completions.create(params);
+      const response = await withAuthRetry(() =>
+        client.chat.completions.create(
+          params as unknown as OpenAI.ChatCompletionCreateParamsNonStreaming,
+        ),
+      );
       return response.choices[0]?.message?.content ?? '';
     },
   };

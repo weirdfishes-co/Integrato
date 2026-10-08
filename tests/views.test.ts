@@ -81,6 +81,7 @@ describe('the chatbot settings form', () => {
     slug: 'coach',
     name: 'Coach',
     description: '',
+    kind: 'text',
     language: 'English',
     welcome: '',
     createdAt: '',
@@ -103,6 +104,8 @@ describe('the chatbot settings form', () => {
     anonymize: false,
     temperature: null,
     topP: null,
+    aspectRatio: null,
+    voice: null,
   };
 
   function model(overrides: Partial<ModelOption> = {}): ModelOption {
@@ -114,6 +117,8 @@ describe('the chatbot settings form', () => {
       outputPricePerMillion: null,
       supportsReasoning: true,
       supportsSampling: true,
+      inputModalities: ['text'],
+      outputModalities: ['text'],
       ...overrides,
     };
   }
@@ -216,7 +221,7 @@ describe('inline event handlers', () => {
 
   function pages(): string[] {
     const assistant: Assistant = {
-      id: 1, slug: 'coach', name: hostile, description: '', language: 'English',
+      id: 1, slug: 'coach', name: hostile, description: '', kind: 'text', language: 'English',
       welcome: '', createdAt: '',
     };
     const note: Note = {
@@ -269,6 +274,7 @@ describe('the setup strip under the chat', () => {
     slug: 'coach',
     name: 'Coach',
     description: '',
+    kind: 'text',
     language: 'Nederlands',
     welcome: '',
     createdAt: '',
@@ -291,6 +297,8 @@ describe('the setup strip under the chat', () => {
     anonymize: false,
     temperature: null,
     topP: null,
+    aspectRatio: null,
+    voice: null,
   };
 
   function render(overrides: Partial<AssistantSettings> = {}): string {
@@ -401,6 +409,7 @@ describe('the document pages', () => {
     slug: 'coach',
     name: 'Coach',
     description: '',
+    kind: 'text',
     language: 'English',
     welcome: '',
     createdAt: '',
@@ -423,6 +432,8 @@ describe('the document pages', () => {
     anonymize: false,
     temperature: null,
     topP: null,
+    aspectRatio: null,
+    voice: null,
   };
 
   const note: Note = {
@@ -507,6 +518,7 @@ describe('the admin conversation log pages', () => {
     slug: 'coach',
     name: 'Coach',
     description: '',
+    kind: 'text',
     language: 'English',
     welcome: '',
     createdAt: '',

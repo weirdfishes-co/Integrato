@@ -6,6 +6,8 @@ import type { Config } from '../config.js';
 import type { Assistant, Note, Repo } from '../db/repo.js';
 import { logger } from '../logger.js';
 import { readNoteInput, MAX_NOTE_CHARS, MAX_NOTES_PER_USER, NoteError } from '../notes.js';
+import { createRateLimiter } from '../rate-limit.js';
+import { convertPdf, pdfBody } from './pdf.js';
 import { loadSettings } from '../settings.js';
 import type { Views } from '../views.js';
 
@@ -78,6 +80,20 @@ export function createNoteRouter({ config, repo, auth, views }: NoteRouteDeps): 
     }
     return note;
   }
+
+  // Parsing a PDF costs CPU, so it is budgeted per user like messages are.
+  const pdfLimiter = createRateLimiter(10, 5 * 60 * 1000);
+
+  // Before /:slug/documents/:id, which would otherwise read "pdf" as an id.
+  router.post('/:slug/documents/pdf', auth.requireUser, pdfBody, async (req, res) => {
+    const assistant = await resolveWritable(req, res);
+    if (!assistant) return;
+    if (!pdfLimiter.take(`user:${req.user!.id}`)) {
+      res.status(429).json({ error: 'Too many PDFs in a short time. Try again in a few minutes.' });
+      return;
+    }
+    await convertPdf(req, res);
+  });
 
   router.get('/:slug/documents', auth.requireUser, async (req, res) => {
     const assistant = await resolveWritable(req, res);
