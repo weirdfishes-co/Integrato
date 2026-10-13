@@ -1,7 +1,7 @@
 import type { Config, Effort } from './config.js';
 import { EFFORT_LEVELS } from './config.js';
 import type { Repo } from './db/repo.js';
-import { isAspectRatio, isVoice } from './kinds.js';
+import { isAspectRatio, isVoice, kindSpec, type AssistantKind } from './kinds.js';
 
 /**
  * Settings an admin controls on /admin. They live in the database so a change
@@ -59,8 +59,8 @@ export interface AssistantSettings {
    */
   aspectRatio: string | null;
   /**
-   * Which voice a text-to-speech chatbot speaks in. Null sends nothing and
-   * leaves it to the model.
+   * Which voice a text-to-speech chatbot speaks in. Null means the default voice:
+   * the provider refuses a request that names none.
    */
   voice: string | null;
 }
@@ -180,6 +180,21 @@ export async function loadSettings(
 }
 
 /** Writes the settings an admin submitted; unchanged values are rewritten as-is. */
+/**
+ * Points a chatbot at the default model for its kind. Called when a chatbot is
+ * created and when its kind changes: the model saved for the old kind is not in
+ * the new kind's list, so keeping it would leave a chatbot that fails on its
+ * first message.
+ */
+export async function applyKindDefaultModel(
+  repo: Repo,
+  config: Config,
+  assistantId: number,
+  kind: AssistantKind,
+): Promise<void> {
+  await repo.setSetting(assistantId, KEYS.model, kindSpec(kind).defaultModel ?? config.defaultModel);
+}
+
 export async function saveSettings(
   repo: Repo,
   assistantId: number,

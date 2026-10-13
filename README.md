@@ -195,6 +195,19 @@ a picture costs its tokens once.
 
 ### Text → speech
 
+**It reads your text back, it does not answer it.** That distinction matters,
+because the models that speak are chat models with a voice rather than
+narrators: left to themselves, "The report is due Friday" gets "Understood, I
+will remind you" read aloud. A chatbot of this type is told that reading the
+message *is* the job — word for word, in the language it was written in,
+whatever the answer language says — so typing a paragraph gets you that
+paragraph spoken. Ask it for something else ("translate this into Dutch") and it
+does that and reads the result.
+
+There is no temperature or top-p here, nor on speech → text. Both govern how
+freely a model composes, and neither of those two composes: one reads your words
+back, the other writes down what it hears.
+
 Pick a **voice** — `alloy`, `nova`, `onyx`, `shimmer` and seven others — or leave
 it on *model default*. The catalogue does not publish voices, so the list is
 maintained here; the provider refuses a name it does not have rather than
@@ -213,7 +226,8 @@ wrapped into a 24 kHz mono WAV by the app before they are stored.
 
 The composer gains a **Choose a recording** control. Upload `.wav`, `.mp3`,
 `.m4a`, `.ogg`, `.flac` or `.webm` up to about 6 MB — a few minutes of speech —
-and the answer is the transcript. Anything typed alongside the file is sent as
+and the answer is the transcript. A file past that is refused with a message
+saying so, not an error page. Anything typed alongside the file is sent as
 an instruction, so "translate this into Dutch" works as well as a plain
 transcription.
 

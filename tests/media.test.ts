@@ -214,12 +214,13 @@ describe('a speech request', () => {
 
     expect(bodies[0]?.stream).toBe(true);
     expect(bodies[0]?.modalities).toEqual(['text', 'audio']);
-    expect(bodies[0]?.audio).toEqual({ format: 'pcm16' });
+    // The provider answers 400 without a voice, so an unset one is still sent.
+    expect(bodies[0]?.audio).toEqual({ voice: 'alloy', format: 'pcm16' });
     // For the same reason an image sends none: a prose cap truncates media.
     expect(bodies[0]).not.toHaveProperty('max_tokens');
   });
 
-  it('sends a voice only when one was chosen', async () => {
+  it('sends the chosen voice', async () => {
     const bodies = stubStream([audioChunk({ audio: { data: PCM } }, 'stop')]);
     await createChatClient(config).stream(speechRequest({ voice: 'nova' }), events);
 

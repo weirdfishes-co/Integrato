@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
+import type { AssistantKind } from './kinds.js';
 import { logger } from './logger.js';
 
 /**
@@ -18,6 +19,8 @@ export interface PromptSources {
   readonly language?: string;
   /** Ask the model to name the knowledge-base file behind each claim. */
   readonly citations?: boolean;
+  /** Decides whether the reading rule below is appended. See kinds.ts. */
+  readonly kind?: AssistantKind;
 }
 
 interface CacheEntry {
@@ -39,6 +42,28 @@ When a statement comes from one of the context documents, mark it with the file 
 in square brackets, like [Guidelines.md], directly after the sentence. Cite the document
 you actually used, never one you did not read. Statements that do not come from a
 document get no marker.`;
+
+/**
+ * What a text-to-speech chatbot is for.
+ *
+ * The models that speak are *chat* models with a voice, not narrators: given
+ * "The report is due Friday" they will happily answer it — "Understood, I will
+ * remind you" — read that aloud, and the user who wanted their sentence spoken
+ * gets a reply to it instead. This says plainly that the job is to read, which
+ * is the whole meaning of the kind.
+ *
+ * It overrides the language rule on purpose: reading text aloud in a language
+ * it was not written in is translation, which nobody asked for.
+ */
+const SPEECH_RULE = `# Your only job
+
+Read the user's message aloud, word for word, exactly as they wrote it.
+
+Do not answer it, do not reply to it, do not introduce it, do not comment on it
+and do not add or remove anything. Read it in the language it is written in,
+whatever language you were told to answer in. If the user asks for something
+other than reading — a translation, a summary — do that and read the result
+aloud, and nothing else.`;
 
 function languageRule(language: string): string {
   return (
@@ -120,7 +145,7 @@ export async function buildSystemPrompt(sources: PromptSources): Promise<string>
 
   const contextFiles = await listContextFiles(contextDir);
   const citations = sources.citations === true;
-  const current = `${assistantName}|${language}|${citations}|${await fingerprint([instructionsPath, ...contextFiles])}`;
+  const current = `${assistantName}|${language}|${citations}|${sources.kind ?? 'text'}|${await fingerprint([instructionsPath, ...contextFiles])}`;
   const cached = cache.get(instructionsPath);
   if (cached && cached.fingerprint === current) {
     return cached.prompt;
@@ -147,6 +172,9 @@ export async function buildSystemPrompt(sources: PromptSources): Promise<string>
 
   const sections: string[] = [resolvedInstructions, languageRule(language)];
   if (citations) sections.push(CITATION_RULE);
+  // Last, so it wins over anything instr.md or the language rule asked for: for
+  // this kind, reading the message *is* the behaviour, not a preference.
+  if (sources.kind === 'speech') sections.push(SPEECH_RULE);
 
   // Files already inserted through a placeholder are not sent a second time.
   const documents: string[] = [];

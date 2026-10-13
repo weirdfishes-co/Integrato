@@ -20,6 +20,7 @@ import { logger } from '../logger.js';
 import { isAspectRatio, isAssistantKind, isVoice, DEFAULT_KIND, type AssistantKind } from '../kinds.js';
 import { euProviderTags, listModelsForKind, type ModelOption } from '../models.js';
 import {
+  applyKindDefaultModel,
   loadSettings,
   parseDomains,
   parseSampling,
@@ -190,6 +191,7 @@ export function createAdminRouter({
       const slug = uniqueSlug(slugify(name), (candidate) => taken.has(candidate));
       const assistant = await repo.createAssistant(slug, name, '', config.assistantLanguage, kind);
       await provisionAssistant(config, assistant, bundledContent);
+      if (kind !== DEFAULT_KIND) await applyKindDefaultModel(repo, config, assistant.id, kind);
 
       logger.info({ by: req.user!.id, slug, name }, 'assistant created');
       res.redirect(`/admin/assistants/${assistant.id}`);
@@ -242,6 +244,7 @@ export function createAdminRouter({
     const kind: AssistantKind = isAssistantKind(kindValue) ? kindValue : assistant.kind;
 
     await repo.updateAssistant(assistant.id, name, description, language, welcome, kind);
+    if (kind !== assistant.kind) await applyKindDefaultModel(repo, config, assistant.id, kind);
     logger.info({ by: req.user!.id, assistantId: assistant.id }, 'assistant updated');
     res.redirect(`/admin/assistants/${assistant.id}?ok=${encodeURIComponent('Identity saved.')}`);
   });

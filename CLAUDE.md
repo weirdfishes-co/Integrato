@@ -380,6 +380,19 @@ context/*.md         knowledge base seeded into a brand-new assistant
   12 output an image and 4 output audio, and those sets change weekly — a list
   of ids would be stale within a month. Filtering also *is* the safety: offering
   a text model to an image chatbot yields one that fails on its first message.
+- **A speaking chatbot reads, and has to be told so.** The models that output
+  audio are *chat* models with a voice, not narrators: given "The report is due
+  Friday" they answer it — "Understood, I will remind you" — and read the answer
+  aloud, so a user who wanted their sentence spoken gets a reply to it. The
+  user said as much: "I don't understand how it works. it should process the
+  text and change it into a speech?" `SPEECH_RULE` in `context.ts` is appended
+  **last**, after the language rule, because for this kind reading is the
+  behaviour and not a preference — including reading in the language the text
+  was written in, since reading aloud in another language is translation.
+  The kind is therefore part of the prompt cache's fingerprint, or one kind's
+  prompt would be served to another.
+  It also has **no sampling**: temperature and top-p govern how freely a model
+  composes, and this one does not compose.
 - **Speech is the mirror image of the image path.** It *must* stream — the API
   answers "Audio output requires stream: true" otherwise — where an image must
   not, and the only format available while streaming is bare `pcm16`, because a
@@ -392,7 +405,7 @@ context/*.md         knowledge base seeded into a brand-new assistant
   The words arrive twice over, as `delta.content` and as
   `delta.audio.transcript`; gpt-audio sends only the transcript, so the answer
   falls back to it or the conversation stores a blank beside the sound.
-  Voices are **ours to list**: `supported_voices` is null on every speaking
+  Voices are **ours to list**, and one is **required** — omitting `audio.voice` is a 400, which `describeChatError` shows only as the generic sentence (found in the field): `supported_voices` is null on every speaking
   model, so `VOICES` was checked by hand, and the provider refuses an unknown
   name rather than ignoring it.
 - **`MODEL_MAX_TOKENS` is not sent on an image or a speech request.** It is an
@@ -578,7 +591,7 @@ Per-assistant settings (the `assistant_settings` table, `settings.ts`, saved on
 `citations`, `compaction`, `notes` (users' own documents), `eu_only`,
 `anonymize`, `admin_conversation_log`, `temperature`, `top_p` (the last two
 empty = send nothing), `aspect_ratio` (image chatbots; empty = the model
-chooses), `voice` (speaking chatbots; empty = the model's own). Which of these the form shows depends on the chatbot's `kind` —
+chooses), `voice` (speaking chatbots; empty = `alloy`, because the provider rejects a request with no voice). Which of these the form shows depends on the chatbot's `kind` —
 see `kinds.ts`. Identity lives on the `assistants` row instead: `name`,
 `slug`, `description`, `language`, `welcome`. A new key needs its entry in
 `KEYS`, `loadSettings`, `saveSettings`, the form in `views.ts`, the route in
@@ -651,6 +664,20 @@ see `kinds.ts`. Identity lives on the `assistants` row instead: `name`,
   misconfiguration and the admin never sees it. Any new setting that depends on
   something outside the app belongs in that function — anonymization does not,
   which is the point of it running in here.
+- **A body limit declared on a router does nothing.** body-parser runs once per
+  request: the first parser to reach it sets `req._body` and every later one
+  steps aside, so the global pair in `app.ts` decided every limit and the
+  generous ones in `routes/content.ts` and `routes/notes.ts` were dead code. Two
+  promises were therefore unkeepable — `MAX_DOCUMENT_BYTES` said 512 kB while
+  anything over ~250 kB failed, and a speech-to-text chatbot could not accept a
+  recording longer than about twenty seconds. The three routes that carry more
+  than a form's worth of data now get their limit in `app.ts` **before** the
+  default, each constant exported from the module that knows how big its data
+  can be. A new route needing a large body belongs in that list.
+  It failed as a **500**, too: body-parser rejects by throwing, and the error
+  handler reported "something went wrong on our side" for what was the
+  request's fault. `createErrorHandler` in `security.ts` now answers **413**
+  with a sentence, and `tests/security.test.ts` pins both branches.
 - **Never set `ASSISTANTS_DIR` to a relative path in a deployed environment.**
   The image points it at `/data`; a value copied from `.env` such as
   `./data/assistants` resolves inside `/app`, which the `node` user cannot

@@ -28,8 +28,12 @@ export interface NoteRouteDeps {
   views: Views;
 }
 
-/** Room for a full document plus its form encoding. */
-const bodyLimit = `${Math.ceil((MAX_NOTE_CHARS * 4) / 1024)}kb`;
+/**
+ * Room for a full document plus its form encoding. Applied in `app.ts` before
+ * the global parser, for the reason given in `routes/content.ts`.
+ */
+export const NOTES_BODY_LIMIT = `${Math.ceil((MAX_NOTE_CHARS * 4) / 1024)}kb`;
+export const NOTES_PATH = '/:slug/documents';
 
 function field(body: unknown, name: string): string {
   if (typeof body !== 'object' || body === null) return '';
@@ -41,7 +45,7 @@ export function createNoteRouter({ config, repo, auth, views }: NoteRouteDeps): 
   const router = Router();
   const resolveAssistant = createAssistantResolver({ repo, views });
 
-  router.use(express.urlencoded({ extended: false, limit: bodyLimit }));
+  // No parser here: see NOTES_BODY_LIMIT above. app.ts mounts it.
 
   /**
    * The chatbot, if this user may use it *and* its admin switched the editor

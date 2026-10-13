@@ -47,6 +47,22 @@ describe('the kinds', () => {
     }
   });
 
+  it('welcomes an image chatbot with the instruction to describe the picture', () => {
+    expect(kindSpec('image').welcome).toBe(`${kindSpec('text').welcome} Describe the image that the model should generate.`);
+    expect(kindSpec('text').welcome).not.toContain('Describe the image');
+  });
+
+  /*
+   * Temperature and top-p govern how freely a model *composes*. A speaking
+   * chatbot reads the user's words back, so neither can change its output —
+   * and a knob that cannot change anything is worse than an absent one.
+   */
+  it('gives a speaking chatbot no sampling knobs', async () => {
+    expect(kindHasSetting('speech', 'sampling')).toBe(false);
+    expect(kindHasSetting('speech', 'voice')).toBe(true);
+    expect(kindHasSetting('text', 'sampling')).toBe(true);
+  });
+
   it('gives a speaking chatbot a voice, and nobody else one', async () => {
     expect(kindHasSetting('speech', 'voice')).toBe(true);
     expect(kindHasSetting('text', 'voice')).toBe(false);
@@ -99,6 +115,13 @@ describe('the kinds', () => {
     expect(kindHasSetting('transcribe', 'aspectRatio')).toBe(false);
     expect(kindHasSetting('text', 'language')).toBe(true);
     expect(kindHasSetting('text', 'sampling')).toBe(true);
+  });
+
+  it('has a default model per non-text kind, and text follows the environment', async () => {
+    expect(kindSpec('image').defaultModel).toBe('google/gemini-3.1-flash-image');
+    expect(kindSpec('transcribe').defaultModel).toBe('assemblyai/universal-3-5-pro');
+    expect(kindSpec('speech').defaultModel).toBe('openai/gpt-audio-mini');
+    expect(kindSpec('text').defaultModel).toBeUndefined();
   });
 
   // ---- the aspect ratios --------------------------------------------------

@@ -6,6 +6,7 @@ import {
   ASSISTANT_KINDS,
   DEFAULT_KIND,
   KINDS,
+  DEFAULT_VOICE,
   VOICES,
 } from './kinds.js';
 import type { Balance } from './balance.js';
@@ -423,7 +424,6 @@ ${passwordField}
         scripts: ['/app.js'],
         body: `    <div class="app" data-email="${escapeHtml(user.email)}" data-assistant="${label}"
          data-slug="${escapeHtml(assistant.slug)}"
-         data-welcome="${escapeHtml(assistant.welcome)}"
          data-kind="${assistant.kind}"
          data-accepts="${spec.accepts}"
          data-version="${ASSET_VERSION}">
@@ -455,6 +455,8 @@ ${passwordField}
           <button type="button" class="icon-button only-mobile" id="toggle-sidebar" aria-label="Show conversations">☰</button>
           <h1 id="conversation-title">New conversation</h1>
         </header>
+
+        <p class="welcome">${escapeHtml(assistant.welcome.trim() || spec.welcome)}</p>
 
         <div class="messages" id="messages" aria-live="polite"></div>
 
@@ -723,7 +725,7 @@ ${
         : `          <div class="field">
             <label for="voice">Voice</label>
             <select id="voice" name="voice">
-              <option value=""${settings?.voice ? '' : ' selected'}>model default</option>
+              <option value=""${settings?.voice ? '' : ' selected'}>default (${DEFAULT_VOICE})</option>
 ${VOICES.map(
   (option) =>
     `              <option value="${option}"${
@@ -909,7 +911,7 @@ ${ASSISTANT_KINDS.map(
     }>${escapeHtml(KINDS[option].label)}${KINDS[option].ready ? '' : ' (not working yet)'}</option>`,
 ).join('\n')}
             </select>
-            <p class="muted small">${escapeHtml(kind.summary)} Changing it changes which models and settings apply, so <strong>pick the model again afterwards</strong> — the one saved now will not be in the new list.</p>
+            <p class="muted small">${escapeHtml(kind.summary)} Changing it changes which models and settings apply, so the model is <strong>reset to the default for the new type</strong> — change it afterwards if you prefer another.</p>
           </div>
 ${
   kindHasSetting(assistant.kind, 'language')
@@ -924,7 +926,7 @@ ${
             <textarea id="welcome" name="welcome" rows="4" maxlength="${MAX_WELCOME_LENGTH}"
                       placeholder="This is an AI bot. It can be wrong or miss context, so treat answers as a starting point and use your own judgment before acting on anything important."
                       >${escapeHtml(assistant.welcome)}</textarea>
-            <p class="muted small">Shown in an empty conversation, at most ${MAX_WELCOME_LENGTH} characters. Leave it empty for the default sentence.</p>
+            <p class="muted small">Always shown at the top of the chat, at most ${MAX_WELCOME_LENGTH} characters. Leave it empty for the default sentence.</p>
           </div>
           <div class="field">
             <label for="slug">Address</label>

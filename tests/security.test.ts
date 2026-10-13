@@ -2,7 +2,13 @@ import type { NextFunction, Request, Response } from 'express';
 import { describe, expect, it, vi } from 'vitest';
 
 import { loadConfig } from '../src/config.js';
-import { createOriginGuard, securityHeaders, warnAboutProxy } from '../src/security.js';
+import { MAX_AUDIO_BASE64, MESSAGE_BODY_LIMIT } from '../src/routes/chat.js';
+import {
+  createErrorHandler,
+  createOriginGuard,
+  securityHeaders,
+  warnAboutProxy,
+} from '../src/security.js';
 import { createViews } from '../src/views.js';
 
 const views = createViews({ assistantName: 'Integrato', assistantLanguage: 'English' });
@@ -22,8 +28,15 @@ function env(extra: Record<string, string | undefined> = {}): NodeJS.ProcessEnv 
 /** A response that records what a middleware did to it. */
 function fakeResponse() {
   const headers = new Map<string, string>();
-  const state = { status: 200, body: '' as unknown, ended: false };
+  const state = { status: 200, body: '' as unknown, ended: false, headersSent: false };
   const res = {
+    get headersSent() {
+      return state.headersSent;
+    },
+    end() {
+      state.ended = true;
+      return this;
+    },
     setHeader: (name: string, value: string) => headers.set(name.toLowerCase(), value),
     status(code: number) {
       state.status = code;
@@ -197,5 +210,73 @@ describe('TRUST_PROXY', () => {
     warn(req, res, next as unknown as NextFunction);
 
     expect(next).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('the error handler', () => {
+  const handle = createErrorHandler({ views });
+
+  /** body-parser throws this when a request is over the limit. */
+  function tooLargeError() {
+    const error = new Error('request entity too large') as Error & {
+      status: number;
+      type: string;
+    };
+    error.status = 413;
+    error.type = 'entity.too.large';
+    return error;
+  }
+
+  /*
+   * The bug this pins. An oversized body is the request's fault, and reporting
+   * it as a 500 sent people looking at the server: a user uploading a
+   * two-minute recording was told "something went wrong on our side", and the
+   * log filled with errors nobody could act on.
+   */
+  it('answers 413 for an oversized body, not 500', () => {
+    const { res, state } = fakeResponse();
+    handle(tooLargeError(), request('POST', {}, '/admin/assistants/1/content/upload'), res, vi.fn() as unknown as NextFunction);
+
+    expect(state.status).toBe(413);
+    expect(String(state.body)).toContain('too large');
+  });
+
+  it('says it in JSON on an API path', () => {
+    const { res, state } = fakeResponse();
+    handle(tooLargeError(), request('POST', {}, '/api/ears/conversations/1/messages'), res, vi.fn() as unknown as NextFunction);
+
+    expect(state.status).toBe(413);
+    expect(state.body).toEqual({ error: 'That upload is too large.' });
+  });
+
+  /* Anything else is still ours, and still says nothing about internals. */
+  it('answers 500 for a real fault, without leaking it', () => {
+    const { res, state } = fakeResponse();
+    handle(new Error('ECONNREFUSED 10.0.0.5:5432'), request('GET', {}, '/admin'), res, vi.fn() as unknown as NextFunction);
+
+    expect(state.status).toBe(500);
+    expect(String(state.body)).not.toContain('ECONNREFUSED');
+    expect(String(state.body)).not.toContain('10.0.0.5');
+  });
+
+  it('just ends the response when the headers have already gone', () => {
+    const { res, state } = fakeResponse();
+    state.headersSent = true;
+    handle(new Error('late'), request('GET', {}, '/'), res, vi.fn() as unknown as NextFunction);
+
+    expect(state.status).toBe(200);
+  });
+});
+
+describe('body limits', () => {
+  /*
+   * body-parser runs once per request, so these are mounted in app.ts ahead of
+   * the global pair. The parser's limit has to exceed the feature's own cap, or
+   * the generic "too large" wins and the specific message is never reached.
+   */
+  it('leaves room above the audio cap for the JSON envelope', () => {
+    const limitKb = Number.parseInt(MESSAGE_BODY_LIMIT, 10);
+
+    expect(limitKb * 1024).toBeGreaterThan(MAX_AUDIO_BASE64);
   });
 });

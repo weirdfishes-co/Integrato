@@ -22,7 +22,10 @@ const MAX_PROMPT_CHARS = 20_000;
  * third larger than the file itself. 8 MB of base64 is roughly a six-megabyte
  * upload: some minutes of speech at a sane bitrate.
  */
-const MAX_AUDIO_BASE64 = 8 * 1024 * 1024;
+export const MAX_AUDIO_BASE64 = 8 * 1024 * 1024;
+/** The path that carries a recording, and the body limit it needs. See app.ts. */
+export const MESSAGES_PATH = '/api/:slug/conversations/:id/messages';
+export const MESSAGE_BODY_LIMIT = `${Math.ceil((MAX_AUDIO_BASE64 * 1.2) / 1024)}kb`;
 /** Gated here; the provider has the final say on what it can read. */
 const AUDIO_FORMATS = new Set(['wav', 'mp3', 'm4a', 'aac', 'ogg', 'flac', 'webm']);
 /*
@@ -283,6 +286,7 @@ export function createChatRouter({ config, repo, auth, chat, views }: ChatRouteD
         assistantName: assistant.name,
         language: assistant.language,
         citations: settings.citations,
+        kind: assistant.kind,
       });
 
       // Both of these go after the cached knowledge base, and for the same

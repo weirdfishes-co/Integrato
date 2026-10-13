@@ -38,6 +38,9 @@ export type KindSetting =
   | 'language'
   | 'voice';
 
+const BASE_WELCOME =
+  'This is an AI bot. It can be wrong or miss context, so treat answers as a starting point and use your own judgment before acting on anything important.';
+
 export interface KindSpec {
   readonly label: string;
   /** One line under the chooser, in the admin form. */
@@ -47,11 +50,21 @@ export interface KindSpec {
   /** What comes back, and therefore how the chat renders it. */
   readonly produces: 'text' | 'image' | 'audio';
   readonly settings: readonly KindSetting[];
+  /** Shown at the top of the chat when the admin has not written a welcome message. */
+  readonly welcome: string;
   /**
    * False while the chat cannot actually do this yet. The admin form says so
    * rather than letting someone configure a chatbot that answers as text.
    */
   readonly ready: boolean;
+  /**
+   * The model a new chatbot of this kind starts with, and the one it is reset
+   * to when its kind changes. Absent for text, which follows OPENROUTER_MODEL.
+   * Chosen by trying them: Nano Banana 2.1 was rate-limited upstream, so image
+   * starts on 3.1 Flash Image; speech to text starts on a dedicated transcriber
+   * because GPT Audio reads only WAV and MP3.
+   */
+  readonly defaultModel?: string;
 }
 
 /*
@@ -76,6 +89,7 @@ export const KINDS: Readonly<Record<AssistantKind, KindSpec>> = {
       'notes',
       'anonymize',
     ],
+    welcome: BASE_WELCOME,
     ready: true,
   },
   image: {
@@ -90,7 +104,9 @@ export const KINDS: Readonly<Record<AssistantKind, KindSpec>> = {
      * carry a name or an address.
      */
     settings: ['language', 'aspectRatio', 'anonymize'],
+    welcome: `${BASE_WELCOME} Describe the image that the model should generate.`,
     ready: true,
+    defaultModel: 'google/gemini-3.1-flash-image',
   },
   transcribe: {
     label: 'Speech → text',
@@ -107,15 +123,24 @@ export const KINDS: Readonly<Record<AssistantKind, KindSpec>> = {
      * transcription endpoint at all.
      */
     settings: [],
+    welcome: `${BASE_WELCOME} Upload a wav or mp3 file. It will be transcribed into text that the model will show as an answer.`,
     ready: true,
+    defaultModel: 'assemblyai/universal-3-5-pro',
   },
   speech: {
     label: 'Text → speech',
-    summary: 'The user writes and the model reads it aloud.',
+    summary: 'The user writes and the model reads it back aloud, word for word.',
     accepts: 'text',
     produces: 'audio',
-    settings: ['voice', 'language', 'sampling'],
+    /*
+     * No sampling. Temperature and top-p govern how freely a model *composes*,
+     * and this one does not compose: it reads the user's words back. A knob
+     * that cannot change the outcome is worse than absent.
+     */
+    settings: ['voice', 'language'],
+    welcome: `${BASE_WELCOME} The text you enter in the ask a question field will be recorded into audio. You can replay and download the result.`,
     ready: true,
+    defaultModel: 'openai/gpt-audio-mini',
   },
 };
 
@@ -163,7 +188,8 @@ export function isAspectRatio(value: unknown): value is (typeof ASPECT_RATIOS)[n
  * `supported_voices` is null on every model that speaks — so this list is ours,
  * checked by hand against gpt-audio-mini: alloy, nova, onyx and shimmer all
  * speak, and an unknown name is refused by the provider rather than ignored.
- * An unset voice sends nothing and lets the model use its own.
+ * The provider *requires* one ("Missing required parameter: 'audio.voice'", a
+ * 400), so an unset voice is sent as DEFAULT_VOICE rather than omitted.
  */
 export const VOICES = [
   'alloy',
@@ -178,6 +204,9 @@ export const VOICES = [
   'shimmer',
   'verse',
 ] as const;
+
+/** What is spoken when an admin has not chosen: the request fails without a voice. */
+export const DEFAULT_VOICE: (typeof VOICES)[number] = 'alloy';
 
 export function isVoice(value: unknown): value is (typeof VOICES)[number] {
   return typeof value === 'string' && (VOICES as readonly string[]).includes(value);

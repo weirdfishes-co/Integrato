@@ -719,7 +719,15 @@ code {
   margin-top: var(--space-4);
 }
 
+/*
+ * A table carries no margin of its own, and the last row's rule reads as a
+ * line, so anything placed after one sits *on* that line. A paragraph has a
+ * default margin and escapes; a button, a link row or a form does not — which
+ * is why each is named here.
+ */
 .panel .table + .row--form,
+.panel .table + .row,
+.panel .table + button,
 .panel .table + form {
   margin-top: var(--space-5);
 }
@@ -1212,12 +1220,18 @@ input[type='file'] {
   font-size: 0.9em;
 }
 
-.empty-state {
+/*
+ * Sits on the same column as the setup strip below the composer, so the two
+ * lines of small print line up; keep the inline padding in step with .setup.
+ */
+.welcome {
   white-space: pre-line;
-  max-width: 65ch;
-  margin: auto;
-  text-align: center;
-  font-size: 0.9375rem;
+  margin: 0;
+  padding: var(--space-2) 0;
+  padding-inline: max(var(--space-4), (100% - (65ch + 8rem)) / 2);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
   color: var(--text-muted);
 }
 

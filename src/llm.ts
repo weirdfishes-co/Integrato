@@ -2,7 +2,7 @@ import OpenAI from 'openai';
 
 import { anonymizeBatch } from './anonymize.js';
 import type { Config, Effort } from './config.js';
-import type { AssistantKind } from './kinds.js';
+import { DEFAULT_VOICE, type AssistantKind } from './kinds.js';
 import type { MessageUsage, Role } from './db/repo.js';
 import { logger } from './logger.js';
 import { euProviderTags, isTranscriptionModel } from './models.js';
@@ -121,6 +121,10 @@ export function describeChatError(error: unknown): string {
       // Reached only after the retries in withAuthRetry, so it is persistent.
       // The user cannot fix a key; say so, and keep the admin's hint short.
       return 'The model service did not accept the request, even after retrying. Please come back in a few minutes; if it keeps happening, tell an administrator to check the OpenRouter key.';
+    case 400:
+    case 422:
+      // A setting this model does not accept (a missing voice was exactly this).
+      return 'The model refused this request, probably because a setting on this chatbot does not suit the model. An administrator can find the reason in the server log.';
     case 402:
       return 'The OpenRouter account has too little credit for this request. An administrator needs to add credit, or lower MODEL_MAX_TOKENS.';
     case 404:
@@ -603,10 +607,11 @@ export function createChatClient(config: Config): ChatClient {
           model: settings.model,
           stream: true,
           modalities: ['text', 'audio'],
-          audio: { ...(settings.voice ? { voice: settings.voice } : {}), format: 'pcm16' },
+          audio: { voice: settings.voice ?? DEFAULT_VOICE, format: 'pcm16' },
           stream_options: { include_usage: true },
           usage: { include: true },
-          ...sampling(settings),
+          // No sampling, as for images: a value saved before the kind was
+          // switched must not be sent.
           ...(provider ? { provider } : {}),
           messages: [
             { role: 'system', content: systemPrompt },
@@ -684,7 +689,21 @@ export function createChatClient(config: Config): ChatClient {
       const stream = await withAuthRetry(
         () => client.chat.completions.create(params, { signal }),
         signal,
-      );
+      ).catch((error: unknown) => {
+        // A 400 on a request that carries a recording is, in practice, the
+        // recording: gpt-audio takes only WAV and MP3, and the generic "a
+        // setting does not suit the model" sent an admin hunting in the wrong
+        // place. Chat models differ in what they read, so this names the cause
+        // without claiming to know which format the model wanted.
+        const hasRecording = history.some((turn) => turn.audio);
+        if (hasRecording && error instanceof OpenAI.APIError && error.status === 400) {
+          logger.warn({ model: settings.model, providerMessage: error.message }, 'recording rejected');
+          throw new ChatRefusalError(
+            'The model could not read this recording. Many chat models, GPT Audio among them, accept only WAV or MP3 — convert the file, or ask an administrator to pick a dedicated transcriber such as AssemblyAI or Whisper.',
+          );
+        }
+        throw error;
+      });
 
       let answer = '';
       let refused = false;

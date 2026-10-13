@@ -41,11 +41,6 @@ const { usageLine, totalsLine } = await import(`./format.js?v=${assetVersion}`);
  */
 const accepts = document.querySelector('.app')?.dataset.accepts ?? 'text';
 
-/** Set per chatbot on its admin page; empty falls back to the sentence below. */
-const welcomeMessage =
-  document.querySelector('.app')?.dataset.welcome?.trim() ||
-  'This is an AI bot. It can be wrong or miss context, so treat answers as a starting point and use your own judgment before acting on anything important.';
-
 const state = {
   conversations: [],
   activeId: null,
@@ -256,14 +251,6 @@ function renderSources(wrapper, sources) {
   wrapper.append(list);
 }
 
-function showEmptyState() {
-  els.messages.replaceChildren();
-  const empty = document.createElement('p');
-  empty.className = 'empty-state';
-  empty.textContent = welcomeMessage;
-  els.messages.append(empty);
-}
-
 function scrollToBottom() {
   els.messages.scrollTop = els.messages.scrollHeight;
 }
@@ -296,9 +283,7 @@ async function openConversation(id) {
 
   state.messages = data.messages.map((message) => ({ usage: message.usage ?? null }));
 
-  if (data.messages.length === 0) {
-    showEmptyState();
-  } else {
+  if (data.messages.length > 0) {
     for (const message of data.messages) {
       addMessage(message.role, message.content, {
         usage: message.usage,
@@ -319,8 +304,8 @@ async function createConversation() {
   state.activeId = data.conversation.id;
   els.title.textContent = data.conversation.title;
   state.messages = [];
+  els.messages.replaceChildren();
   renderTotals();
-  showEmptyState();
   renderConversations();
   closeSidebarOnMobile();
   els.prompt.focus();
@@ -403,8 +388,6 @@ async function readRecording(file) {
 
 async function sendPrompt(text) {
   if (!state.activeId) await createConversation();
-
-  els.messages.querySelector('.empty-state')?.remove();
 
   const file = accepts === 'audio' ? (els.recording?.files?.[0] ?? null) : null;
   if (accepts === 'audio' && !file) {
@@ -562,7 +545,6 @@ els.toggleSidebar?.addEventListener('click', () => {
       await createConversation();
     }
   } catch (error) {
-    showEmptyState();
     addMessage('assistant', `Loading failed: ${error.message}`, { error: true });
   }
 })();
