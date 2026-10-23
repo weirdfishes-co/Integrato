@@ -24,6 +24,44 @@ describe('buildSystemPrompt', () => {
     resetPromptCache();
   });
 
+  /*
+   * The models that speak are chat models with a voice, not narrators: typing
+   * "The report is due Friday" got "Understood, I will remind you" read aloud,
+   * which is an answer to the sentence rather than the sentence. For this kind
+   * reading *is* the behaviour, so the rule is appended last and overrides both
+   * instr.md and the language rule.
+   */
+  it('tells a speaking chatbot to read the message, not answer it', async () => {
+    const sources = makeWorkspace({}, 'You are a helpful assistant.');
+    const prompt = await buildSystemPrompt({ ...sources, kind: 'speech' });
+
+    expect(prompt).toContain('Read the user');
+    expect(prompt).toContain('word for word');
+    expect(prompt).toContain('Do not answer it');
+    // After the language rule, so it is the last word on what to do.
+    expect(prompt.indexOf('Read the user')).toBeGreaterThan(prompt.indexOf('Always answer in'));
+  });
+
+  it('says nothing of the sort to any other kind', async () => {
+    const sources = makeWorkspace({}, 'You are a helpful assistant.');
+
+    for (const kind of ['text', 'image', 'transcribe'] as const) {
+      resetPromptCache();
+      expect(await buildSystemPrompt({ ...sources, kind })).not.toContain('word for word');
+    }
+  });
+
+  /* The kind is part of the fingerprint, or the cache would serve the wrong one. */
+  it('does not serve one kind\u2019s prompt to another from the cache', async () => {
+    const sources = makeWorkspace({}, 'You are a helpful assistant.');
+
+    const text = await buildSystemPrompt({ ...sources, kind: 'text' });
+    const speech = await buildSystemPrompt({ ...sources, kind: 'speech' });
+
+    expect(text).not.toContain('word for word');
+    expect(speech).toContain('word for word');
+  });
+
   it('contains the instructions and the language rule', async () => {
     const sources = makeWorkspace({}, 'You are a test assistant.');
     const prompt = await buildSystemPrompt(sources);

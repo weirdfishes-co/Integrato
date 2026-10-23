@@ -6,6 +6,7 @@ import type { Config } from '../config.js';
 import { ContentError, createContentStore, MAX_DOCUMENT_BYTES, type ContentStore } from '../content.js';
 import type { Assistant, Repo } from '../db/repo.js';
 import { logger } from '../logger.js';
+import { convertPdf, pdfBody } from './pdf.js';
 import { instructionsDescription } from '../views.js';
 import type { Views } from '../views.js';
 
@@ -24,8 +25,15 @@ export interface ContentRouteDeps {
   repo: Repo;
 }
 
-/** More generous than the global body limit: documents may be up to MAX_DOCUMENT_BYTES. */
-const bodyLimit = `${Math.ceil((MAX_DOCUMENT_BYTES * 2) / 1024)}kb`;
+/**
+ * Documents may be up to MAX_DOCUMENT_BYTES, which is larger than the app's
+ * default body limit. It is applied in `app.ts`, *before* the global parser,
+ * not here: body-parser runs once per request and whichever parser reaches it
+ * first decides the limit, so a parser mounted on this router would never be
+ * consulted. Exported for that reason.
+ */
+export const CONTENT_BODY_LIMIT = `${Math.ceil((MAX_DOCUMENT_BYTES * 2) / 1024)}kb`;
+export const CONTENT_PATH = '/admin/assistants/:id/content';
 
 function fail(error: unknown, res: express.Response, next: express.NextFunction, redirectTo: string): void {
   if (error instanceof ContentError) {
@@ -43,8 +51,7 @@ export function createContentRouter({ auth, views, config, repo }: ContentRouteD
   const router = Router({ mergeParams: true });
 
   router.use(auth.requireAdmin);
-  router.use(express.urlencoded({ extended: false, limit: bodyLimit }));
-  router.use(express.json({ limit: bodyLimit }));
+  // No parsers here: see CONTENT_BODY_LIMIT above. app.ts mounts them.
 
   /** Resolves :id into an assistant plus a store over its own directory. */
   async function resolve(
@@ -196,6 +203,12 @@ export function createContentRouter({ auth, views, config, repo }: ContentRouteD
     } catch (error) {
       fail(error, res, next, found.base);
     }
+  });
+
+  /** PDF in, Markdown out; the browser then saves it through /upload like any .md file. */
+  router.post('/pdf', pdfBody, async (req, res) => {
+    if (!(await resolve(req, res))) return;
+    await convertPdf(req, res);
   });
 
   /** JSON upload: [{ name, content }]. Existing files are overwritten. */

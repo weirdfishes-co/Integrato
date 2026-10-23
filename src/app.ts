@@ -2,7 +2,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import cookieParser from 'cookie-parser';
-import express, { type Express, type NextFunction, type Request, type Response } from 'express';
+import express, { type Express } from 'express';
 
 import { createAuth } from './auth.js';
 import type { Config } from './config.js';
@@ -15,11 +15,11 @@ import { logger } from './logger.js';
 import { createMailer } from './mail.js';
 import { createAdminRouter } from './routes/admin.js';
 import { createAuthRouter } from './routes/auth.js';
-import { createChatRouter } from './routes/chat.js';
-import { createNoteRouter } from './routes/notes.js';
-import { createContentRouter } from './routes/content.js';
+import { createChatRouter, MESSAGES_PATH, MESSAGE_BODY_LIMIT } from './routes/chat.js';
+import { createNoteRouter, NOTES_PATH, NOTES_BODY_LIMIT } from './routes/notes.js';
+import { createContentRouter, CONTENT_PATH, CONTENT_BODY_LIMIT } from './routes/content.js';
 import { createConversationsRouter } from './routes/conversations.js';
-import { createOriginGuard, securityHeaders, warnAboutProxy } from './security.js';
+import { createErrorHandler, createOriginGuard, securityHeaders, warnAboutProxy } from './security.js';
 import { createViews } from './views.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -66,6 +66,25 @@ export function createApp(config: Config, db: Db): App {
   app.use(warnAboutProxy(config));
   app.use(createOriginGuard({ config, views }));
 
+  /*
+   * Body limits, and the order matters.
+   *
+   * body-parser runs once per request: the first parser to reach it sets
+   * `req._body` and every later one steps aside. So a limit declared on a
+   * router is never consulted — the global pair below would already have
+   * rejected the request. Worse, it rejects by *throwing*, which the error
+   * handler at the bottom of this file turns into a 500: a user uploading a
+   * two-minute recording was told "something went wrong on our side".
+   *
+   * The three routes that legitimately carry more than a form's worth of data
+   * therefore get their limit here, ahead of the default, and each limit lives
+   * with the feature that knows how big its data can be.
+   */
+  app.post(MESSAGES_PATH, express.json({ limit: MESSAGE_BODY_LIMIT }));
+  app.use(CONTENT_PATH, express.json({ limit: CONTENT_BODY_LIMIT }));
+  app.use(CONTENT_PATH, express.urlencoded({ extended: false, limit: CONTENT_BODY_LIMIT }));
+  app.use(NOTES_PATH, express.urlencoded({ extended: false, limit: NOTES_BODY_LIMIT }));
+
   app.use(express.urlencoded({ extended: false, limit: '64kb' }));
   app.use(express.json({ limit: '256kb' }));
   app.use(cookieParser());
@@ -100,18 +119,7 @@ export function createApp(config: Config, db: Db): App {
     res.status(404).type('html').send(views.errorPage(404, 'This page does not exist.'));
   });
 
-  app.use((error: Error, req: Request, res: Response, _next: NextFunction) => {
-    logger.error({ err: error, path: req.path }, 'unexpected error');
-    if (res.headersSent) {
-      res.end();
-      return;
-    }
-    if (req.path.startsWith('/api/')) {
-      res.status(500).json({ error: 'Internal server error' });
-      return;
-    }
-    res.status(500).type('html').send(views.errorPage(500, 'Something went wrong on our side.'));
-  });
+  app.use(createErrorHandler({ views }));
 
   return { express: app, db, repo, bundledContent };
 }

@@ -18,11 +18,31 @@ if (form && input && status) {
     status.textContent = `Uploading ${files.length} file(s)…`;
 
     try {
-      const payload = await Promise.all(
-        files.map(async (file) => ({ name: file.name, content: await file.text() })),
-      );
-
       const page = document.querySelector('[data-upload]');
+      const pdfUrl = page?.dataset.pdf ?? '/admin/content/pdf';
+
+      // A PDF is converted on the server and then travels the same way as a
+      // .md file, so there is one place that writes to the knowledge base.
+      async function read(file) {
+        if (!/\.pdf$/i.test(file.name)) return { name: file.name, content: await file.text() };
+        const converted = await fetch(`${pdfUrl}?name=${encodeURIComponent(file.name)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/pdf', Accept: 'application/json' },
+          body: file,
+        });
+        if (converted.status === 401) {
+          window.location.href = '/login';
+          throw new Error('Signed out.');
+        }
+        const result = await converted.json().catch(() => ({}));
+        if (!converted.ok) throw new Error(`${file.name}: ${result.error ?? `conversion failed (${converted.status})`}`);
+        return { name: result.name, content: result.markdown };
+      }
+
+      status.textContent = `Converting and uploading ${files.length} file(s)…`;
+      const payload = [];
+      for (const file of files) payload.push(await read(file));
+
       const uploadUrl = page?.dataset.upload ?? '/admin/content/upload';
       const response = await fetch(uploadUrl, {
         method: 'POST',

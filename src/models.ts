@@ -1,3 +1,4 @@
+import { kindSpec, type AssistantKind } from './kinds.js';
 import { logger } from './logger.js';
 
 /**
@@ -40,11 +41,15 @@ export interface ModelOption {
   supportsReasoning: boolean;
   /** Several reasoning models reject a temperature; the picker says so. */
   supportsSampling: boolean;
+  /** The catalogue's own words, used to pick the models a kind can use. */
+  inputModalities: readonly string[];
+  outputModalities: readonly string[];
 }
 
 interface CatalogueRow {
   id?: unknown;
   name?: unknown;
+  architecture?: { input_modalities?: unknown; output_modalities?: unknown };
   context_length?: unknown;
   pricing?: { prompt?: unknown; completion?: unknown };
   supported_parameters?: unknown;
@@ -95,7 +100,73 @@ function toModel(row: CatalogueRow): ModelOption | null {
     outputPricePerMillion: perMillion(row.pricing?.completion),
     supportsReasoning: parameters.includes('reasoning'),
     supportsSampling: parameters.includes('temperature') || parameters.includes('top_p'),
+    inputModalities: strings(row.architecture?.input_modalities),
+    outputModalities: strings(row.architecture?.output_modalities),
   };
+}
+
+function strings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+}
+
+/**
+ * The models that can do what this kind needs, by the catalogue's own
+ * modalities rather than a list of ids we would have to maintain. Of 468
+ * models roughly 460 produce text, 12 produce an image and 4 produce audio,
+ * so for anything but text this is the difference between a usable picker and
+ * a wall of models that would fail on the first message.
+ */
+export function modelsForKind(models: readonly ModelOption[], kind: AssistantKind): ModelOption[] {
+  const { accepts, produces } = kindSpec(kind);
+  return models.filter(
+    (model) =>
+      model.inputModalities.includes(accepts) &&
+      (model.outputModalities.includes(produces) ||
+        // A dedicated transcriber (AssemblyAI, Fish Audio, Whisper, …) says
+        // "transcription", not "text". See `listModelsForKind`.
+        (kind === 'transcribe' && model.outputModalities.includes(TRANSCRIPTION))),
+  );
+}
+
+/** What a dedicated speech-to-text model outputs in the catalogue. */
+export const TRANSCRIPTION = 'transcription';
+
+/**
+ * The picker list for a kind. A speech-to-text chatbot can use two sorts of
+ * model: a chat model that accepts audio, and a dedicated transcriber. The
+ * default catalogue lists only the first sort — OpenRouter keeps the others
+ * behind `output_modalities=transcription` — so that is a second request,
+ * and one that is allowed to fail without losing the first list.
+ */
+export async function listModelsForKind(
+  kind: AssistantKind,
+  options: { region?: 'eu' } = {},
+): Promise<ModelOption[]> {
+  const chat = await listModels(options);
+  if (kind !== 'transcribe') return modelsForKind(chat, kind);
+
+  const dedicated = await listModels({ ...options, output: TRANSCRIPTION }).catch((error) => {
+    logger.warn({ err: error }, 'could not load the transcription models');
+    return [] as ModelOption[];
+  });
+  const seen = new Set(chat.map((model) => model.id));
+  const merged = [...chat, ...dedicated.filter((model) => !seen.has(model.id))];
+  return modelsForKind(merged, kind).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Does this model transcribe through `/audio/transcriptions` rather than the
+ * chat endpoint? Asked of the catalogue, which is cached for an hour. If the
+ * catalogue cannot be reached the answer is no, and the request goes the chat
+ * way, where a dedicated transcriber fails with a plain 404 instead of hanging.
+ */
+export async function isTranscriptionModel(modelId: string): Promise<boolean> {
+  try {
+    const models = await listModels({ output: TRANSCRIPTION });
+    return models.some((model) => model.id === modelId);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -107,12 +178,18 @@ function toModel(row: CatalogueRow): ModelOption | null {
  * the catalogue's own filter, not a guess of ours, and it is what the model
  * picker shows once a chatbot is set to EU-only.
  */
-export async function listModels(options: { region?: 'eu' } = {}): Promise<ModelOption[]> {
+export async function listModels(
+  options: { region?: 'eu'; output?: string } = {},
+): Promise<ModelOption[]> {
   const region = options.region ?? 'all';
-  const cached = fresh(catalogues.get(region) ?? null);
+  const key = options.output ? `${region}:${options.output}` : region;
+  const cached = fresh(catalogues.get(key) ?? null);
   if (cached) return cached;
 
-  const url = options.region ? `${CATALOGUE_URL}?region=${options.region}` : CATALOGUE_URL;
+  const query = new URLSearchParams();
+  if (options.region) query.set('region', options.region);
+  if (options.output) query.set('output_modalities', options.output);
+  const url = query.toString() ? `${CATALOGUE_URL}?${query}` : CATALOGUE_URL;
   const body = await getJson<{ data?: unknown }>(url);
   const rows = Array.isArray(body.data) ? (body.data as CatalogueRow[]) : [];
   const models = rows
@@ -124,8 +201,8 @@ export async function listModels(options: { region?: 'eu' } = {}): Promise<Model
     throw new Error('OpenRouter model list was empty');
   }
 
-  catalogues.set(region, { fetchedAt: Date.now(), value: models });
-  logger.info({ models: models.length, region }, 'model catalogue refreshed');
+  catalogues.set(key, { fetchedAt: Date.now(), value: models });
+  logger.info({ models: models.length, region, output: options.output }, 'model catalogue refreshed');
   return models;
 }
 

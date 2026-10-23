@@ -162,3 +162,48 @@ export function warnAboutProxy(config: Config) {
     next();
   };
 }
+
+/**
+ * The last middleware: turns anything thrown into a response.
+ *
+ * It lives here rather than inline in `app.ts` because the one distinction it
+ * makes is worth testing. A body over the limit arrives as a thrown
+ * `entity.too.large`, which is **not** a server fault; reported as a 500 it
+ * tells the reader to look in the wrong place and fills the log with errors
+ * nobody can act on. A user uploading a two-minute recording was told
+ * "something went wrong on our side".
+ */
+export function createErrorHandler({ views }: { views: Views }) {
+  return function handleError(
+    error: Error,
+    req: Request,
+    res: Response,
+    _next: NextFunction,
+  ): void {
+    if (res.headersSent) {
+      res.end();
+      return;
+    }
+
+    const status = (error as { status?: number; statusCode?: number }).status ?? 0;
+    const tooLarge = status === 413 || (error as { type?: string }).type === 'entity.too.large';
+
+    if (tooLarge) {
+      logger.warn({ path: req.path }, 'request body rejected as too large');
+      const message = 'That upload is too large.';
+      if (req.path.startsWith('/api/')) {
+        res.status(413).json({ error: message });
+      } else {
+        res.status(413).type('html').send(views.errorPage(413, message));
+      }
+      return;
+    }
+
+    logger.error({ err: error, path: req.path }, 'unexpected error');
+    if (req.path.startsWith('/api/')) {
+      res.status(500).json({ error: 'Internal server error' });
+      return;
+    }
+    res.status(500).type('html').send(views.errorPage(500, 'Something went wrong on our side.'));
+  };
+}

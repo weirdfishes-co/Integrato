@@ -37,6 +37,23 @@ describe('public/styles.css', () => {
   });
 
   /*
+   * A table has no margin of its own and its last row draws a rule, so anything
+   * placed after one sits on that line. A paragraph escapes by its default
+   * margin; a button, a link row and a form do not. Two pages had it — the
+   * access form's Save button and the document list's "write a new document"
+   * link — and nothing failed, because touching is not an error. Measured at
+   * 0px in a browser, which is the only way to see it.
+   */
+  it('spaces whatever follows a table inside a panel', () => {
+    const rule = /\.panel \.table \+ [^{]*\{[^}]*\}/s.exec(css)?.[0] ?? '';
+
+    expect(rule).toContain('margin-top');
+    for (const after of ['button', '.row', 'form']) {
+      expect(rule, `a ${after} after a table would touch the rule`).toContain(after);
+    }
+  });
+
+  /*
    * Named explicitly because its absence is invisible until a padded element
    * is measured, and by then the symptom looks like a layout bug somewhere
    * else entirely.

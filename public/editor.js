@@ -35,4 +35,46 @@ if (textarea && preview) {
   });
 
   render();
+
+  // Start from a PDF: the server converts it, the text lands here to be edited.
+  const pdfInput = document.getElementById('pdf');
+  const pdfStatus = document.getElementById('pdf-status');
+  const pdfUrl = document.querySelector('.page--editor')?.dataset.pdf;
+  if (pdfInput && pdfStatus && pdfUrl) {
+    pdfInput.addEventListener('change', async () => {
+      const file = pdfInput.files?.[0];
+      if (!file) return;
+      if (textarea.value.trim() !== '' && !window.confirm('Replace the text in the editor with this PDF?')) {
+        pdfInput.value = '';
+        return;
+      }
+      pdfStatus.textContent = 'Converting…';
+      try {
+        const response = await fetch(`${pdfUrl}?name=${encodeURIComponent(file.name)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/pdf', Accept: 'application/json' },
+          body: file,
+        });
+        if (response.status === 401) {
+          window.location.href = '/login';
+          return;
+        }
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error ?? `Conversion failed (${response.status})`);
+
+        textarea.value = result.markdown;
+        const nameField = document.getElementById('name');
+        if (nameField && nameField.value.trim() === '') nameField.value = result.name.replace(/\.md$/, '').replace(/-/g, ' ');
+        render();
+        pdfStatus.textContent =
+          limit > 0 && result.markdown.length > limit
+            ? `${result.pages} page(s) converted, but the text is ${(result.markdown.length - limit).toLocaleString('en-US')} characters over the limit. Shorten it before saving.`
+            : `${result.pages} page(s) converted. Check the text before saving.`;
+      } catch (error) {
+        pdfStatus.textContent = error.message;
+      } finally {
+        pdfInput.value = '';
+      }
+    });
+  }
 }

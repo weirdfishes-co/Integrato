@@ -123,6 +123,8 @@ describe('loadSettings', () => {
       anonymize: true,
       temperature: 0.3,
       topP: null,
+      aspectRatio: null,
+      voice: null,
     });
 
     expect(await loadSettings(repo, config, assistantId)).toEqual({
@@ -142,6 +144,8 @@ describe('loadSettings', () => {
       anonymize: true,
       temperature: 0.3,
       topP: null,
+      aspectRatio: null,
+      voice: null,
     });
   });
 
